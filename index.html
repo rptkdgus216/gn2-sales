@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>경남2사무소 영업활동 대시보드</title>
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f4f6f9; --surface: #ffffff; --surface-2: #f8fafc; --border: #e2e8f0;
+    --text: #0f172a; --text-2: #475569; --muted: #94a3b8;
+    --navy: #1e293b; --brand: #ff6a00; --brand-ink: #c2410c; --link: #2563eb;
+    --bar: #eb6834; --bar-2: #64748b; --grid: #eef2f6;
+    --good: #0ca30c; --warn: #b77900; --bad: #d03b3b;
+    --good-bg: #e8f7e8; --warn-bg: #fff4dc; --bad-bg: #fde8e8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111214; --surface: #1a1a19; --surface-2: #222220; --border: #33332f;
+      --text: #f0efec; --text-2: #c3c2b7; --muted: #8a8980;
+      --navy: #0b0f17; --brand-ink: #ff8a3d; --link: #7aa7ff;
+      --bar: #d95926; --bar-2: #8a96a8; --grid: #2a2a27;
+      --good-bg: #16301a; --warn-bg: #3a2e10; --bad-bg: #3a1a1a; --warn: #fab219;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: 'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; font-size: 14px; }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 16px; }
+  .hidden { display: none !important; }
+
+  /* header */
+  .top { background: var(--navy); color: #fff; border-left: 6px solid var(--brand); border-radius: 12px;
+    padding: 14px 18px; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  .top h1 { font-size: 18px; margin: 0; font-weight: 800; }
+  .top small { color: #94a3b8; display: block; margin-top: 2px; font-size: 12px; }
+  .top .ctrls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .top select, .top button { background: #273449; border: 1px solid #3b4a63; color: #fff; border-radius: 8px; padding: 7px 10px; cursor: pointer; }
+  .top button.primary { background: var(--brand); border-color: var(--brand); font-weight: 700; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 4px; margin: 14px 0; overflow-x: auto; }
+  .tab { border: 1px solid var(--border); background: var(--surface); padding: 9px 16px; border-radius: 999px; cursor: pointer; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+  .tab.on { background: var(--navy); color: #fff; border-color: var(--navy); }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .card h2 { font-size: 14px; margin: 0 0 12px; font-weight: 800; color: var(--text); }
+  .card h2 .sub { font-weight: 500; color: var(--muted); font-size: 12px; margin-left: 6px; }
+  .grid { display: grid; gap: 14px; }
+  .grid > * { min-width: 0; }
+  .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .two { grid-template-columns: 3fr 2fr; }
+  @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .two { grid-template-columns: 1fr; } }
+  .kpi .label { font-size: 12px; color: var(--text-2); font-weight: 700; }
+  .kpi .val { font-size: 24px; font-weight: 900; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .kpi .delta { font-size: 12px; margin-top: 4px; color: var(--text-2); }
+  .up { color: var(--good); } .down { color: var(--bad); }
+  .chart-box { position: relative; height: 240px; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--text-2); font-weight: 700; font-size: 12px; padding: 8px; border-bottom: 1px solid var(--border); background: var(--surface-2); position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+  td { padding: 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tr.click { cursor: pointer; } tr.click:hover td { background: var(--surface-2); }
+  .scroll { overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 10px; }
+  .truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .acc-name { color: var(--link); font-weight: 700; }
+
+  .chip { display: inline-flex; align-items: center; gap: 3px; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+  .chip.긍정 { background: var(--good-bg); color: var(--good); }
+  .chip.보류 { background: var(--warn-bg); color: var(--warn); }
+  .chip.거절 { background: var(--bad-bg); color: var(--bad); }
+  .chip.none { background: var(--surface-2); color: var(--muted); }
+  .tag { display: inline-block; background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 6px; margin: 2px 2px 0 0; font-size: 12px; color: var(--text-2); }
+  .badge-warn { background: var(--warn-bg); color: var(--warn); }
+
+  .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; align-items: center; }
+  .toolbar input, .toolbar select { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 8px 10px; }
+  .toolbar input { flex: 1; min-width: 180px; }
+
+  /* form */
+  .form { display: grid; gap: 14px; grid-template-columns: 1fr 1fr; }
+  .form .full { grid-column: 1 / -1; }
+  @media (max-width: 700px) { .form { grid-template-columns: 1fr; } }
+  .field label.lbl { display: block; font-size: 12px; font-weight: 800; color: var(--text-2); margin-bottom: 6px; }
+  .field label.lbl .req { color: var(--bad); }
+  .field input[type=text], .field input[type=date], .field select, .field textarea {
+    width: 100%; border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 9px 10px; }
+  .field textarea { min-height: 80px; resize: vertical; }
+  .checks { display: flex; flex-wrap: wrap; gap: 6px; }
+  .checks label { border: 1px solid var(--border); border-radius: 999px; padding: 5px 11px; cursor: pointer; user-select: none; font-size: 13px; background: var(--surface); }
+  .checks input { display: none; }
+  .checks input:checked + span { font-weight: 800; }
+  .checks label:has(input:checked) { background: var(--navy); color: #fff; border-color: var(--navy); }
+  .btn { background: var(--brand); color: #fff; border: 0; border-radius: 10px; padding: 12px 18px; font-weight: 800; cursor: pointer; }
+  .btn.ghost { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+  .btn:disabled { opacity: .5; cursor: wait; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+  /* timeline */
+  .tl { display: grid; gap: 10px; }
+  .tl-item { border-left: 3px solid var(--brand); background: var(--surface-2); padding: 10px 12px; border-radius: 0 8px 8px 0; }
+  .tl-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; color: var(--text-2); }
+  .tl-head b { color: var(--text); font-size: 13px; }
+  .tl-body { margin-top: 6px; white-space: pre-wrap; line-height: 1.55; font-size: 13px; }
+  .tl-body .q { color: var(--text-2); }
+  .tl-next { margin-top: 6px; font-size: 12px; color: var(--brand-ink); font-weight: 700; }
+
+  /* modal */
+  .modal { position: fixed; inset: 0; background: rgba(15,23,42,.6); display: flex; align-items: flex-start; justify-content: center; padding: 24px 12px; z-index: 50; overflow-y: auto; }
+  .modal-box { background: var(--bg); border-radius: 14px; width: 100%; max-width: 980px; overflow: hidden; }
+  .modal-head { background: var(--navy); color: #fff; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .modal-head h3 { margin: 0; font-size: 16px; }
+  .modal-head button { background: none; border: 0; color: #cbd5e1; font-size: 26px; cursor: pointer; line-height: 1; }
+  .modal-body { padding: 16px; display: grid; gap: 14px; }
+
+  /* login */
+  .login { position: fixed; inset: 0; background: var(--navy); display: flex; align-items: center; justify-content: center; z-index: 100; padding: 16px; }
+  .login-box { background: var(--surface); border-radius: 14px; padding: 28px; width: 100%; max-width: 360px; border-top: 6px solid var(--brand); }
+  .login-box h2 { margin: 0 0 4px; font-size: 18px; }
+  .login-box p { margin: 0 0 18px; color: var(--text-2); font-size: 13px; }
+  .login-box input { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 11px; margin-bottom: 10px; background: var(--surface); }
+  .login-box .btn { width: 100%; }
+  .err { color: var(--bad); font-size: 13px; min-height: 18px; margin-top: 6px; }
+
+  .loading { text-align: center; padding: 80px 0; color: var(--text-2); }
+  .spinner { width: 34px; height: 34px; border: 4px solid var(--border); border-top-color: var(--brand); border-radius: 50%; margin: 0 auto 12px; animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--navy); color: #fff; padding: 12px 18px; border-radius: 10px; z-index: 200; font-weight: 700; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
+  .warnbox { background: var(--warn-bg); color: var(--text); border-radius: 10px; padding: 10px 14px; font-size: 12px; }
+  .warnbox summary { cursor: pointer; font-weight: 700; color: var(--warn); }
+  .empty { color: var(--muted); text-align: center; padding: 24px; }
+  .row-flex { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+</style>
+</head>
+<body>
+
+<!-- 로그인 -->
+<div id="login" class="login">
+  <form class="login-box" onsubmit="doLogin(event)">
+    <h2>경남2사무소 영업활동</h2>
+    <p>사무소 비밀번호를 입력하세요.</p>
+    <input id="pw" type="password" autocomplete="current-password" placeholder="비밀번호" required>
+    <button class="btn" id="loginBtn" type="submit">접속</button>
+    <div class="err" id="loginErr"></div>
+  </form>
+</div>
+
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1>경남2사무소 영업활동 대시보드</h1>
+      <small id="genAt">방문기록 · 평가실적 실시간 연동</small>
+    </div>
+    <div class="ctrls">
+      <select id="fManager" onchange="state.manager=this.value; renderAll()" aria-label="담당자"></select>
+      <select id="fYear" onchange="state.year=this.value; renderAll()" aria-label="연도"></select>
+      <button class="primary" onclick="loadDashboard(true)">🔄 새로고침</button>
+    </div>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab on" data-tab="home" onclick="showTab('home')">📊 현황</button>
+    <button class="tab" data-tab="accounts" onclick="showTab('accounts')">🏥 거래처</button>
+    <button class="tab" data-tab="todo" onclick="showTab('todo')">📌 다음 할일</button>
+    <button class="tab" data-tab="input" onclick="showTab('input')">✏️ 방문 입력</button>
+  </div>
+
+  <div id="loading" class="loading"><div class="spinner"></div>데이터를 불러오는 중…</div>
+
+  <!-- 현황 -->
+  <section id="tab-home" class="hidden">
+    <div class="grid kpis">
+      <div class="card kpi"><div class="label" id="k1l">최근월 실적</div><div class="val" id="k1">-</div><div class="delta" id="k1d"></div></div>
+      <div class="card kpi"><div class="label" id="k2l">연간 누적 실적</div><div class="val" id="k2">-</div><div class="delta" id="k2d"></div></div>
+      <div class="card kpi"><div class="label">이번 달 방문</div><div class="val" id="k3">-</div><div class="delta" id="k3d"></div></div>
+      <div class="card kpi"><div class="label">30일 이상 미방문 거래처</div><div class="val" id="k4">-</div><div class="delta">DCM처 제외 · 거래처 탭 "미방문 오래된 순"</div></div>
+    </div>
+    <div class="grid two" style="margin-top:14px">
+      <div class="card"><h2 id="c1t">월별 평가실적</h2><div class="chart-box"><canvas id="salesChart" aria-label="월별 평가실적 막대 차트"></canvas></div></div>
+      <div class="card"><h2>주간 방문 건수 <span class="sub">최근 12주</span></h2><div class="chart-box"><canvas id="visitChart" aria-label="주간 방문 건수 막대 차트"></canvas></div></div>
+    </div>
+    <div class="card" style="margin-top:14px">
+      <h2>담당자별 요약</h2>
+      <div class="scroll" style="max-height:none"><table><thead><tr>
+        <th>담당자</th><th class="num">방문처</th><th class="num" id="thLatest">최근월 실적</th><th class="num">전월 대비</th>
+        <th class="num">연간 누적</th><th class="num">이번 달 방문</th><th class="num">거래처당 월평균 방문</th><th class="num">30일+ 미방문</th>
+      </tr></thead><tbody id="staffBody"></tbody></table></div>
+    </div>
+    <div id="warnWrap" style="margin-top:14px"></div>
+  </section>
+
+  <!-- 거래처 -->
+  <section id="tab-accounts" class="hidden">
+    <div class="card">
+      <div class="toolbar">
+        <input id="q" type="search" placeholder="거래처명 · 품목 · 성향태그 검색" oninput="renderAccounts()">
+        <select id="sortBy" onchange="renderAccounts()">
+          <option value="sales">최근월 실적 높은 순</option>
+          <option value="drop">전월 대비 하락 큰 순</option>
+          <option value="stale">미방문 오래된 순</option>
+          <option value="visits">연간 방문 많은 순</option>
+          <option value="name">이름순</option>
+        </select>
+        <span class="tag" id="accCount"></span>
+      </div>
+      <div class="scroll"><table><thead><tr>
+        <th>거래처</th><th>담당</th><th>집중품목 / 성향</th><th class="num" id="thM2"></th><th class="num" id="thM1"></th><th class="num" id="thM0"></th>
+        <th class="num">전월 대비</th><th>마지막 방문</th><th class="num">연간 방문</th><th>최근 반응</th><th>최근 결과</th>
+      </tr></thead><tbody id="accBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- 다음 할일 -->
+  <section id="tab-todo" class="hidden">
+    <div class="card">
+      <h2>다음 할일 <span class="sub">거래처별 가장 최근 방문에 적힌 "다음 액션" 기준</span></h2>
+      <div class="scroll"><table><thead><tr>
+        <th>예정일</th><th>상태</th><th>거래처</th><th>담당</th><th>다음 액션</th><th>마지막 방문</th>
+      </tr></thead><tbody id="todoBody"></tbody></table></div>
+    </div>
+  </section>
+
+  <!-- 방문 입력 -->
+  <section id="tab-input" class="hidden">
+    <div class="grid two">
+      <form class="card" id="visitForm" onsubmit="submitVisit(event)">
+        <h2>방문 기록 입력</h2>
+        <div class="form">
+          <div class="field"><label class="lbl" for="vDate">방문일 <span class="req">*</span></label><input type="date" id="vDate" required></div>
+          <div class="field"><label class="lbl" for="vVisitor">방문자 <span class="req">*</span></label><select id="vVisitor" required onchange="onVisitorChange()"></select></div>
+          <div class="field full">
+            <label class="lbl" for="vAccount">거래처 <span class="req">*</span></label>
+            <div class="row-flex" style="flex-wrap:nowrap">
+              <select id="vAccount" required onchange="onAccountChange()" style="flex:1"></select>
+              <button type="button" class="btn ghost" style="padding:9px 12px;white-space:nowrap" onclick="toggleNewAcc()">+ 신규 거래처</button>
+            </div>
+            <label class="hint"><input type="checkbox" id="vAllAcc" onchange="fillAccountSelect()"> 다른 담당자 거래처·DCM처도 보기 (동행·대리 방문)</label>
+            <div id="newAccBox" class="warnbox hidden" style="margin-top:8px">
+              <b>신규 거래처 등록</b> <span class="hint">처방 전이라 거래처코드를 모르면 비워두세요. 나중에 실적이 나오면 거래처 상세 화면에서 연결합니다.</span>
+              <div class="row-flex" style="margin-top:8px">
+                <input type="text" id="naName" placeholder="거래처명 *" style="flex:1;min-width:160px;padding:8px;border-radius:8px;border:1px solid var(--border)">
+                <input type="text" id="naCode" inputmode="numeric" placeholder="거래처코드 (선택)" style="width:150px;padding:8px;border-radius:8px;border:1px solid var(--border)">
+                <button type="button" class="btn" style="padding:8px 14px" onclick="createAccount(this)">등록</button>
+              </div>
+            </div>
+          </div>
+          <div class="field full"><label class="lbl">제안 품목</label><div class="checks" id="vProducts"></div></div>
+          <div class="field full"><label class="lbl" for="vProposal">제안 내용 (할일)</label><textarea id="vProposal" placeholder="예) 펙수클루 10mg 위염코드 안내 및 웰만사 등록 독려"></textarea></div>
+          <div class="field full"><label class="lbl">원장님 반응 <span class="req">*</span></label>
+            <div class="checks" id="vReaction"></div></div>
+          <div class="field full"><label class="lbl" for="vResult">결과 / 원장님 코멘트 <span class="req">*</span></label><textarea id="vResult" required placeholder="원장님이 하신 말씀, 처방 의향, 거절 사유 등을 구체적으로 적을수록 AI 분석이 정확해집니다."></textarea></div>
+          <div class="field"><label class="lbl" for="vNext">다음 액션</label><input type="text" id="vNext" placeholder="예) 위염코드 근거자료 전달"></div>
+          <div class="field"><label class="lbl" for="vNextDate">다음 예정일</label><input type="date" id="vNextDate"></div>
+          <div class="field full"><label class="lbl">동행</label><div class="checks" id="vComp"></div></div>
+          <div class="full row-flex"><button class="btn" id="saveBtn" type="submit">저장</button><span class="hint">저장하면 '방문기록' 시트에 한 줄로 쌓입니다.</span></div>
+        </div>
+      </form>
+      <div class="card">
+        <h2 id="recentTitle">선택한 거래처 최근 기록</h2>
+        <div id="recentBox" class="empty">거래처를 선택하면 최근 방문 기록이 여기 표시됩니다.</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- 거래처 상세 -->
+<div id="modal" class="modal hidden" onclick="if(event.target===this)closeModal()">
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-head"><h3 id="mTitle">거래처</h3><button onclick="closeModal()" aria-label="닫기">&times;</button></div>
+    <div class="modal-body" id="mBody"></div>
+  </div>
+</div>
+
+<script>
+/* ======================= 상태 ======================= */
+const state = { token: null, boot: null, dash: null, manager: 'ALL', year: null, tab: 'home', charts: {} };
+const store = {
+  get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} },
+  del(k) { try { window.localStorage.removeItem(k); } catch (e) {} }
+};
+
+/* ======================= 서버 호출 ======================= */
+const API_URL = (window.GN2_CONFIG && window.GN2_CONFIG.API_URL) || '';
+async function call(fn, token, args) {
+  if (!API_URL || API_URL.indexOf('script.google.com') === -1) throw new Error('config.js 에 Apps Script 주소(API_URL)가 설정되지 않았습니다.');
+  let res;
+  try {
+    // text/plain 으로 보내야 브라우저 사전 확인(CORS preflight) 없이 Apps Script 로 전달됨
+    res = await fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify({ fn, token, args }), redirect: 'follow' });
+  } catch (e) { throw new Error('서버에 연결하지 못했습니다. 인터넷 연결을 확인해 주세요.'); }
+  let body;
+  try { body = await res.json(); } catch (e) { throw new Error('서버 응답을 읽지 못했습니다. (Apps Script 배포 권한이 "모든 사용자"인지 확인)'); }
+  if (!body.ok) throw new Error(body.error || '알 수 없는 오류');
+  return body.data;
+}
+async function api(fn, ...args) {
+  try { return await call(fn, state.token, args); }
+  catch (e) {
+    if (String(e.message).indexOf('AUTH_EXPIRED') !== -1) logout('접속 시간이 만료되었습니다. 다시 로그인해 주세요.');
+    throw e;
+  }
+}
+
+/* ======================= 로그인 ======================= */
+async function doLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  btn.disabled = true; document.getElementById('loginErr').textContent = '';
+  try {
+    const token = await call('login', null, [document.getElementById('pw').value]);
+    state.token = token; store.set('gn2_token', token);
+    document.getElementById('pw').value = '';
+    start();
+  } catch (err) { document.getElementById('loginErr').textContent = err.message; }
+  btn.disabled = false;
+}
+function logout(msg) {
+  store.del('gn2_token'); state.token = null;
+  document.getElementById('login').classList.remove('hidden');
+  if (msg) document.getElementById('loginErr').textContent = msg;
+}
+async function start() {
+  document.getElementById('login').classList.add('hidden');
+  try {
+    state.boot = await api('getBootstrap');
+    initForm();
+    await loadDashboard();
+  } catch (e) { if (state.token) toast('불러오기 실패: ' + e.message); }
+}
+window.addEventListener('DOMContentLoaded', () => {
+  const t = store.get('gn2_token');
+  if (t) { state.token = t; start(); }
+});
+
+/* ======================= 유틸 ======================= */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const won = n => Math.round(n || 0).toLocaleString('ko-KR');
+function short(n) {
+  n = n || 0; const a = Math.abs(n);
+  if (a >= 1e8) return (n / 1e8).toFixed(a >= 1e9 ? 1 : 2).replace(/\.?0+$/, '') + '억';
+  if (a >= 1e4) return Math.round(n / 1e4).toLocaleString('ko-KR') + '만';
+  return Math.round(n).toLocaleString('ko-KR');
+}
+const pad = n => String(n).padStart(2, '0');
+const ymOf = d => d.getFullYear() + '-' + pad(d.getMonth() + 1);
+const ymd = d => ymOf(d) + '-' + pad(d.getDate());
+const parseYmd = s => { const p = s.split('-').map(Number); return new Date(p[0], p[1] - 1, p[2]); };
+const daysBetween = (a, b) => Math.round((b - a) / 86400000);
+function prevYm(ym) { const [y, m] = ym.split('-').map(Number); return m === 1 ? (y - 1) + '-12' : y + '-' + pad(m - 1); }
+const ymLabel = ym => Number(ym.split('-')[1]) + '월';
+function pct(cur, prev) {
+  if (!prev) return '<span class="delta">-</span>';
+  const p = (cur - prev) / Math.abs(prev) * 100;
+  const cls = p > 0 ? 'up' : p < 0 ? 'down' : '';
+  return `<span class="${cls}">${p > 0 ? '▲' : p < 0 ? '▼' : ''} ${Math.abs(p).toFixed(1)}%</span>`;
+}
+function chip(r) { const icon = { '긍정': '✓', '보류': '◷', '거절': '✕' }[r]; return r ? `<span class="chip ${esc(r)}">${icon || ''} ${esc(r)}</span>` : '<span class="chip none">미분류</span>'; }
+function toast(msg) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = msg; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+/* ======================= 데이터 로드 ======================= */
+async function loadDashboard(force) {
+  document.getElementById('loading').classList.remove('hidden');
+  document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+  try {
+    state.dash = await api('getDashboard');
+    prepare();
+    fillFilters();
+    document.getElementById('genAt').textContent = '기준 시각 ' + state.dash.generatedAt + ' · 방문기록 ' + state.dash.visits.length.toLocaleString() + '건';
+    document.getElementById('loading').classList.add('hidden');
+    showTab(state.tab);
+    if (force) toast('최신 데이터로 갱신했습니다.');
+  } catch (e) {
+    document.getElementById('loading').innerHTML = '데이터를 불러오지 못했습니다.<br><small>' + esc(e.message) + '</small>';
+  }
+}
+
+/** 서버 원본 → 화면용 계산 */
+function prepare() {
+  const d = state.dash;
+  const today = parseYmd(state.boot.today);
+  d.today = today;
+  // 실적이 있는 달 목록
+  const yms = new Set();
+  d.accounts.forEach(a => Object.keys(a.sales).forEach(k => yms.add(k)));
+  d.yms = [...yms].sort();
+  d.years = [...new Set(d.yms.map(k => k.slice(0, 4)))];
+  // 최근 실적월 = 사무소 합계가 0보다 큰 마지막 달
+  const tot = {}; d.accounts.forEach(a => Object.entries(a.sales).forEach(([k, v]) => tot[k] = (tot[k] || 0) + v));
+  d.latestYm = d.yms.filter(k => tot[k] > 0).pop() || ymOf(today);
+  // 방문 집계
+  const byCode = {};
+  d.visits.forEach(([date, visitor, code, reaction]) => {
+    (byCode[code] = byCode[code] || []).push({ date, visitor, reaction });
+  });
+  d.visitsByCode = byCode;
+  d.accounts.forEach(a => {
+    const vs = byCode[a.code] || [];
+    a.lastDate = d.lastVisit[a.code] ? d.lastVisit[a.code].date : '';
+    a.dcm = a.type === 'DCM';
+    a.visitTarget = a.registered && !a.dcm;          // 방문 통계 대상 (DCM·미등록 제외)
+    a.staleDays = !a.visitTarget ? -1 : a.lastDate ? daysBetween(parseYmd(a.lastDate), today) : 9999;
+    a.visitsYear = y => vs.filter(v => v.date.slice(0, 4) === y).length;
+  });
+  if (!state.year || d.years.indexOf(state.year) === -1) state.year = d.years.indexOf(String(today.getFullYear())) !== -1 ? String(today.getFullYear()) : d.years[d.years.length - 1];
+}
+
+function fillFilters() {
+  const fm = document.getElementById('fManager');
+  const managers = state.dash.staff;
+  fm.innerHTML = '<option value="ALL">사무소 전체</option>' + managers.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
+  fm.value = managers.indexOf(state.manager) !== -1 ? state.manager : 'ALL';
+  const fy = document.getElementById('fYear');
+  fy.innerHTML = state.dash.years.map(y => `<option value="${y}">${y}년</option>`).join('');
+  fy.value = state.year;
+}
+
+const filtered = () => state.dash.accounts.filter(a => state.manager === 'ALL' || a.owner === state.manager);
+
+/* ======================= 탭 ======================= */
+function showTab(t) {
+  state.tab = t;
+  document.querySelectorAll('.tab').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
+  if (!state.dash && t !== 'input') return;
+  document.getElementById('tab-' + t).classList.remove('hidden');
+  renderAll();
+}
+function renderAll() {
+  if (!state.dash) return;
+  if (state.tab === 'home') renderHome();
+  if (state.tab === 'accounts') renderAccounts();
+  if (state.tab === 'todo') renderTodo();
+}
+
+/* ======================= 현황 ======================= */
+function renderHome() {
+  const d = state.dash, accs = filtered(), who = state.manager === 'ALL' ? '사무소 전체' : state.manager;
+  const L = d.latestYm, P = prevYm(L);
+  const sum = (list, ym) => list.reduce((s, a) => s + (a.sales[ym] || 0), 0);
+  const latest = sum(accs, L), prev = sum(accs, P);
+  document.getElementById('k1l').textContent = `최근월 실적 (${ymLabel(L)})`;
+  document.getElementById('k1').textContent = short(latest) + '원';
+  document.getElementById('k1d').innerHTML = `전월(${ymLabel(P)}) 대비 ${pct(latest, prev)}`;
+
+  const yms = Array.from({ length: 12 }, (_, i) => state.year + '-' + pad(i + 1));
+  const monthly = yms.map(ym => sum(accs, ym));
+  const filledMonths = monthly.filter(v => v > 0).length;
+  const ytd = monthly.reduce((a, b) => a + b, 0);
+  document.getElementById('k2l').textContent = `${state.year}년 누적 실적`;
+  document.getElementById('k2').textContent = short(ytd) + '원';
+  document.getElementById('k2d').textContent = filledMonths ? `월평균 ${short(ytd / filledMonths)}원 (${filledMonths}개월)` : '';
+
+  const codes = new Set(accs.map(a => a.code));
+  const thisYm = ymOf(d.today);
+  const monday = new Date(d.today); monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const vm = d.visits.filter(v => codes.has(v[2]) && v[0].slice(0, 7) === thisYm).length;
+  const vw = d.visits.filter(v => codes.has(v[2]) && v[0] >= ymd(monday)).length;
+  document.getElementById('k3').textContent = vm.toLocaleString() + '건';
+  document.getElementById('k3d').textContent = `이번 주 ${vw}건 · ${ymLabel(thisYm)} 기준`;
+  document.getElementById('k4').textContent = accs.filter(a => a.visitTarget && a.staleDays >= 30).length + '곳';
+
+  // 월별 실적 차트
+  document.getElementById('c1t').textContent = `${state.year}년 월별 평가실적 · ${who}`;
+  drawBar('salesChart', yms.map(ymLabel), monthly, state.manager === 'ALL' ? cssVar('--bar') : cssVar('--bar-2'), v => short(v) + '원', v => won(v) + '원');
+
+  // 주간 방문
+  const weeks = [];
+  for (let i = 11; i >= 0; i--) { const s = new Date(monday); s.setDate(s.getDate() - i * 7); weeks.push(s); }
+  const wc = weeks.map(s => { const e = new Date(s); e.setDate(e.getDate() + 7); const a = ymd(s), b = ymd(e); return d.visits.filter(v => codes.has(v[2]) && v[0] >= a && v[0] < b).length; });
+  drawBar('visitChart', weeks.map(w => (w.getMonth() + 1) + '/' + w.getDate()), wc, cssVar('--bar-2'), v => v, v => v + '건', ctx => {
+    const s = weeks[ctx[0].dataIndex], e = new Date(s); e.setDate(e.getDate() + 6);
+    return `${s.getMonth() + 1}/${s.getDate()} ~ ${e.getMonth() + 1}/${e.getDate()} 주`;
+  });
+
+  // 담당자별 요약
+  document.getElementById('thLatest').textContent = `${ymLabel(L)} 실적`;
+  const rows = d.staff.map(m => {
+    const list = d.accounts.filter(a => a.owner === m);
+    const c = new Set(list.map(a => a.code));
+    const yVisits = d.visits.filter(v => c.has(v[2]) && v[0].slice(0, 4) === state.year);
+    const monthsSoFar = state.year === String(d.today.getFullYear()) ? d.today.getMonth() + 1 : 12;
+    const regList = list.filter(a => a.visitTarget);
+    return { m, n: regList.length, latest: sum(list, L), prev: sum(list, P), ytd: yms.reduce((s, ym) => s + sum(list, ym), 0),
+      vm: d.visits.filter(v => c.has(v[2]) && v[0].slice(0, 7) === thisYm).length,
+      perAcc: regList.length ? yVisits.length / regList.length / monthsSoFar : 0,
+      stale: regList.filter(a => a.staleDays >= 30).length };
+  });
+  document.getElementById('staffBody').innerHTML = rows.map(r => `
+    <tr class="click" onclick="document.getElementById('fManager').value='${esc(r.m)}';state.manager='${esc(r.m)}';renderAll()" style="${state.manager === r.m ? 'font-weight:800' : ''}">
+      <td style="white-space:nowrap">${esc(r.m)}</td><td class="num">${r.n}</td><td class="num">${won(r.latest)}</td><td class="num">${pct(r.latest, r.prev)}</td>
+      <td class="num">${won(r.ytd)}</td><td class="num">${r.vm}</td><td class="num">${r.perAcc.toFixed(1)}회</td>
+      <td class="num">${r.stale ? '<span class="chip 보류">' + r.stale + '곳</span>' : '0'}</td>
+    </tr>`).join('');
+
+  // 데이터 경고
+  const w = d.warnings || [];
+  const unreg = d.accounts.filter(a => !a.registered);
+  let html = '';
+  if (w.length || unreg.length) {
+    html = `<details class="warnbox"><summary>⚠ 데이터 점검 필요 ${w.length + (unreg.length ? 1 : 0)}건</summary><ul>` +
+      w.map(x => `<li>${esc(x)}</li>`).join('') +
+      (unreg.length ? `<li>평가실적에는 있지만 '거래처' 시트에 없는 곳 ${unreg.length}곳 (합계에는 포함): ${unreg.map(a => esc(a.name) + '(' + esc(a.owner) + ')').join(', ')}</li>` : '') +
+      '</ul></details>';
+  }
+  document.getElementById('warnWrap').innerHTML = html;
+}
+
+function drawBar(id, labels, data, color, tickFmt, tipFmt, titleFn) {
+  if (state.charts[id]) state.charts[id].destroy();
+  const ctx = document.getElementById(id);
+  state.charts[id] = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ data, backgroundColor: color, hoverBackgroundColor: color, borderRadius: { topLeft: 4, topRight: 4 }, borderSkipped: 'bottom', maxBarThickness: 34 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { callbacks: { label: c => tipFmt(c.parsed.y), title: titleFn || (c => c[0].label) } } },
+      scales: {
+        y: { beginAtZero: true, grid: { color: cssVar('--grid') }, border: { display: false }, ticks: { color: cssVar('--text-2'), font: { size: 11 }, callback: tickFmt, maxTicksLimit: 6 } },
+        x: { grid: { display: false }, ticks: { color: cssVar('--text-2'), font: { size: 11 } } }
+      }
+    }
+  });
+}
+
+/* ======================= 거래처 목록 ======================= */
+function renderAccounts() {
+  const d = state.dash, L = d.latestYm, P = prevYm(L), PP = prevYm(P);
+  document.getElementById('thM0').textContent = ymLabel(L);
+  document.getElementById('thM1').textContent = ymLabel(P);
+  document.getElementById('thM2').textContent = ymLabel(PP);
+  const q = document.getElementById('q').value.trim().toLowerCase();
+  let list = filtered().filter(a => !q || (a.name + ' ' + a.focus + ' ' + a.tags + ' ' + a.dept).toLowerCase().indexOf(q) !== -1);
+  const s = document.getElementById('sortBy').value;
+  const diff = a => (a.sales[L] || 0) - (a.sales[P] || 0);
+  const sorters = {
+    sales: (a, b) => (b.sales[L] || 0) - (a.sales[L] || 0),
+    drop: (a, b) => diff(a) - diff(b),
+    stale: (a, b) => b.staleDays - a.staleDays,
+    visits: (a, b) => b.visitsYear(state.year) - a.visitsYear(state.year),
+    name: (a, b) => a.name.localeCompare(b.name, 'ko')
+  };
+  list.sort(sorters[s]);
+  document.getElementById('accCount').textContent = list.length + '곳';
+  document.getElementById('accBody').innerHTML = list.length ? list.map(a => {
+    const lv = d.lastVisit[a.code];
+    const stale = a.visitTarget && a.staleDays >= 30;
+    const tags = a.tags ? a.tags.split(',').map(t => t.trim()).filter(Boolean).map(t => `<span class="tag">${esc(t)}</span>`).join('') : '';
+    return `<tr class="click" onclick="openAccount('${esc(a.code)}')">
+      <td><span class="acc-name">${esc(a.name)}</span>${a.registered ? '' : ' <span class="chip badge-warn">미등록</span>'}${a.dcm ? ' <span class="chip none">DCM</span>' : ''}${a.code.indexOf('TMP-') === 0 ? ' <span class="chip badge-warn">신규·실적 미연결</span>' : ''}</td>
+      <td style="white-space:nowrap">${esc(a.owner)}</td>
+      <td style="max-width:220px">${esc(a.focus)}${tags ? '<div>' + tags + '</div>' : ''}</td>
+      <td class="num">${won(a.sales[PP])}</td><td class="num">${won(a.sales[P])}</td><td class="num"><b>${won(a.sales[L])}</b></td>
+      <td class="num">${pct(a.sales[L] || 0, a.sales[P] || 0)}</td>
+      <td style="white-space:nowrap">${lv ? esc(lv.date) + (stale ? ' <span class="chip 거절">' + a.staleDays + '일</span>' : '') : a.visitTarget ? '<span class="chip none">기록 없음</span>' : '-'}</td>
+      <td class="num">${a.visitsYear(state.year)}</td>
+      <td>${lv ? chip(lv.reaction) : ''}</td>
+      <td class="truncate" title="${esc(lv ? lv.result : '')}">${esc(lv ? lv.result : '')}</td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="11" class="empty">조건에 맞는 거래처가 없습니다.</td></tr>';
+}
+
+/* ======================= 다음 할일 ======================= */
+function renderTodo() {
+  const d = state.dash, today = ymd(d.today);
+  const end = new Date(d.today); end.setDate(end.getDate() + 7); const weekEnd = ymd(end);
+  const rows = filtered().map(a => ({ a, lv: d.lastVisit[a.code] })).filter(x => x.lv && x.lv.nextAction);
+  rows.sort((x, y) => (x.lv.nextDate || '9999') < (y.lv.nextDate || '9999') ? -1 : 1);
+  document.getElementById('todoBody').innerHTML = rows.length ? rows.map(({ a, lv }) => {
+    const nd = lv.nextDate;
+    const st = !nd ? '<span class="chip none">날짜 없음</span>' : nd < today ? '<span class="chip 거절">✕ 지남</span>' : nd <= weekEnd ? '<span class="chip 보류">◷ 이번 주</span>' : '<span class="chip 긍정">예정</span>';
+    return `<tr class="click" onclick="openAccount('${esc(a.code)}')"><td style="white-space:nowrap">${esc(nd || '-')}</td><td>${st}</td>
+      <td class="acc-name">${esc(a.name)}</td><td>${esc(a.owner)}</td><td>${esc(lv.nextAction)}</td><td style="white-space:nowrap">${esc(lv.date)}</td></tr>`;
+  }).join('') : '<tr><td colspan="6" class="empty">등록된 다음 할일이 없습니다. 방문 입력 시 "다음 액션"을 적으면 여기에 모입니다.</td></tr>';
+}
+
+/* ======================= 거래처 상세 ======================= */
+async function openAccount(code) {
+  const modal = document.getElementById('modal');
+  const a = state.dash.accounts.find(x => x.code === code) || { name: code, owner: '' };
+  document.getElementById('mTitle').textContent = `🏥 ${a.name} · ${a.owner}`;
+  document.getElementById('mBody').innerHTML = '<div class="loading"><div class="spinner"></div>히스토리를 불러오는 중…</div>';
+  modal.classList.remove('hidden');
+  try {
+    const det = await api('getAccountDetail', code);
+    renderDetail(code, a, det);
+  } catch (e) { document.getElementById('mBody').innerHTML = '<div class="empty">불러오기 실패: ' + esc(e.message) + '</div>'; }
+}
+function closeModal() { document.getElementById('modal').classList.add('hidden'); if (state.charts.detailChart) { state.charts.detailChart.destroy(); delete state.charts.detailChart; } }
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function renderDetail(code, a, det) {
+  const acc = det.account || {};
+  const vs = det.visits;
+  const cnt = { '긍정': 0, '보류': 0, '거절': 0 };
+  vs.forEach(v => { if (cnt[v.reaction] !== undefined) cnt[v.reaction]++; });
+  const prodCount = {};
+  vs.forEach(v => v.products.split(',').map(s => s.trim()).filter(Boolean).forEach(p => prodCount[p] = (prodCount[p] || 0) + 1));
+  const topProducts = Object.entries(prodCount).sort((x, y) => y[1] - x[1]).slice(0, 8);
+  const yms = Object.keys(det.sales).sort();
+
+  document.getElementById('mBody').innerHTML = `
+    <div class="grid two">
+      <div class="card"><h2>월별 평가실적 <span class="sub">${yms.length ? esc(ymLabel(yms[0])) + ' ~ ' + esc(ymLabel(yms[yms.length - 1])) : ''}</span></h2>
+        <div class="chart-box" style="height:200px"><canvas id="detailChart" aria-label="거래처 월별 실적"></canvas></div></div>
+      <div class="card">
+        <h2>거래처 프로필 ${acc.code ? '<span class="sub">코드 ' + esc(acc.code) + ((acc.extraCodes || []).length ? ' + 추가코드 ' + esc(acc.extraCodes.join(', ')) : '') + '</span>' : '<span class="sub">거래처 시트에 없는 곳이라 수정 불가</span>'}</h2>
+        ${linkBoxHtml(code, a, acc)}
+        <div class="form" style="grid-template-columns:1fr 1fr">
+          <div class="field full"><label class="lbl">집중품목</label><div>${esc(acc.focus || a.focus || '-')}</div></div>
+          <div class="field"><label class="lbl" for="pType">구분</label>
+            <select id="pType" ${acc.code ? '' : 'disabled'}>${['방문처', 'DCM'].map(t => `<option ${(acc.type || '방문처') === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
+            <div class="hint">DCM: 도매 매출자료로 평가 · 방문 통계에서 제외</div></div>
+          <div class="field"><label class="lbl" for="pDept">진료과</label><input type="text" id="pDept" value="${esc(acc.dept || '')}" ${acc.code ? '' : 'disabled'}></div>
+          <div class="field full"><label class="lbl" for="pTags">성향 태그 <span class="hint">(쉼표로 구분 · AI 분석 단계에서 자동 제안 예정)</span></label>
+            <input type="text" id="pTags" value="${esc(acc.tags || '')}" placeholder="예) 근거자료 중시, 업무부담 민감, 간호사 영향력 큼" ${acc.code ? '' : 'disabled'}></div>
+          <div class="field full"><label class="lbl" for="pMemo">메모</label><textarea id="pMemo" style="min-height:56px" ${acc.code ? '' : 'disabled'}>${esc(acc.memo || '')}</textarea></div>
+          ${acc.code ? `<div class="full"><button class="btn ghost" onclick="saveProfile('${esc(code)}', this)">프로필 저장</button></div>` : ''}
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>활동 요약</h2>
+      <div class="row-flex">
+        <span class="tag">총 방문 ${vs.length}회</span>
+        <span class="chip 긍정">✓ 긍정 ${cnt['긍정']}</span><span class="chip 보류">◷ 보류 ${cnt['보류']}</span><span class="chip 거절">✕ 거절 ${cnt['거절']}</span>
+        ${vs.length - cnt['긍정'] - cnt['보류'] - cnt['거절'] ? `<span class="chip none">미분류 ${vs.length - cnt['긍정'] - cnt['보류'] - cnt['거절']} (기존 이관분)</span>` : ''}
+      </div>
+      <div style="margin-top:8px">${topProducts.map(([p, n]) => `<span class="tag">${esc(p)} ${n}회</span>`).join('') || '<span class="hint">제안 품목 기록 없음</span>'}</div>
+    </div>
+    <div class="card">
+      <h2>방문 히스토리 <span class="sub">최신순</span></h2>
+      <div class="tl">${vs.length ? vs.map(v => `
+        <div class="tl-item">
+          <div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}
+            ${v.products ? v.products.split(',').map(p => `<span class="tag">${esc(p.trim())}</span>`).join('') : ''}
+            ${v.companions ? `<span class="tag">동행: ${esc(v.companions)}</span>` : ''}
+            ${v.note ? `<span class="tag">${esc(v.note)}</span>` : ''}</div>
+          <div class="tl-body">${v.proposal ? `<div class="q">▶ ${esc(v.proposal)}</div>` : ''}${esc(v.result)}</div>
+          ${v.nextAction ? `<div class="tl-next">→ 다음: ${esc(v.nextAction)} ${v.nextDate ? '(' + esc(v.nextDate) + ')' : ''}</div>` : ''}
+        </div>`).join('') : '<div class="empty">방문 기록이 없습니다.</div>'}</div>
+    </div>`;
+  if (!yms.length) { document.getElementById('detailChart').parentNode.innerHTML = '<div class="empty">아직 평가실적이 없습니다.</div>'; return; }
+  drawBar('detailChart', yms.map(k => k.slice(2, 4) + '.' + Number(k.slice(5))), yms.map(k => det.sales[k]), cssVar('--bar'), v => short(v), v => won(v) + '원',
+    c => { const k = yms[c[0].dataIndex]; return k.slice(0, 4) + '년 ' + Number(k.slice(5)) + '월'; });
+}
+
+async function saveProfile(code, btn) {
+  btn.disabled = true;
+  try {
+    const profile = { type: document.getElementById('pType').value, dept: document.getElementById('pDept').value, tags: document.getElementById('pTags').value, memo: document.getElementById('pMemo').value };
+    await api('updateAccountProfile', code, profile);
+    const a = state.dash.accounts.find(x => x.code === code);
+    if (a) { a.dept = profile.dept; a.tags = profile.tags; a.type = profile.type; }
+    const b = state.boot.accounts.find(x => x.code === code);
+    if (b) b.type = profile.type;
+    prepare();
+    toast('프로필을 저장했습니다.');
+    renderAll();
+  } catch (e) { toast('저장 실패: ' + e.message); }
+  btn.disabled = false;
+}
+
+/** 신규처(임시코드) → 실적 연결 / 평가실적에만 있는 곳 → 거래처 등록 */
+function linkBoxHtml(code, a, acc) {
+  if (code.indexOf('TMP-') === 0) {
+    // 이름이 비슷한 곳을 추천 (완전 일치 > 포함 > 앞 3글자 일치), 같은 담당자 우선
+    const score = x => (x.name === a.name ? 30 : x.name.indexOf(a.name) !== -1 || a.name.indexOf(x.name) !== -1 ? 20 : x.name.slice(0, 3) === a.name.slice(0, 3) ? 10 : 0) + (x.owner === a.owner ? 1 : 0);
+    const cands = state.dash.accounts.filter(x => !x.registered)
+      .map(x => Object.assign({}, x, { s: score(x) }))
+      .sort((x, y) => y.s - x.s || x.name.localeCompare(y.name, 'ko'));
+    const best = cands[0] && cands[0].s >= 10 ? cands[0] : null;
+    return `<div class="warnbox" style="margin-bottom:12px">
+      <b>신규처 · 실적 미연결</b> — 처방이 나와 평가실적에 잡히면 아래에서 연결하세요. 지금까지의 방문 기록이 그 거래처코드로 옮겨지고 실적이 이어집니다.
+      <div class="row-flex" style="margin-top:8px">
+        <select id="lnkPick" style="flex:1;min-width:180px;padding:7px;border-radius:8px;border:1px solid var(--border)" onchange="document.getElementById('lnkCode').value=this.value">
+          <option value="">평가실적에만 있는 거래처에서 선택…</option>
+          ${cands.map(x => `<option value="${esc(x.code)}" ${best && best.code === x.code ? 'selected' : ''}>${x.s >= 10 ? '★ 추천 · ' : ''}${esc(x.name)} (${esc(x.owner)} · ${esc(x.code)})</option>`).join('')}
+        </select>
+        <input id="lnkCode" type="text" inputmode="numeric" placeholder="또는 거래처코드 직접 입력" value="${best ? esc(best.code) : ''}" style="width:170px;padding:7px;border-radius:8px;border:1px solid var(--border)">
+        <button class="btn" style="padding:8px 14px" onclick="linkCode('${esc(code)}', this)">실적 연결</button>
+      </div></div>`;
+  }
+  if (!acc.code && a.registered === false) {
+    const sc = x => (x.name === a.name ? 30 : x.name.indexOf(a.name) !== -1 || a.name.indexOf(x.name) !== -1 ? 20 : x.name.slice(0, 3) === a.name.slice(0, 3) ? 10 : 0) + (x.owner === a.owner ? 1 : 0);
+    const regs = state.dash.accounts.filter(x => x.registered).map(x => Object.assign({}, x, { s: sc(x) }))
+      .sort((x, y) => y.s - x.s || x.name.localeCompare(y.name, 'ko'));
+    const best = regs[0] && regs[0].s >= 10 ? regs[0] : null;
+    return `<div class="warnbox" style="margin-bottom:12px">
+      평가실적에는 있지만 '거래처' 시트에 없는 곳입니다.
+      <div class="row-flex" style="margin-top:8px">
+        <button class="btn ghost" style="padding:7px 12px" onclick="registerAccount('${esc(code)}', this)">새 거래처로 등록</button>
+        <span class="hint">또는 같은 병원의 다른 코드라면 →</span>
+      </div>
+      <div class="row-flex" style="margin-top:6px">
+        <select id="mergeTo" style="flex:1;min-width:180px;padding:7px;border-radius:8px;border:1px solid var(--border)">
+          <option value="">합칠 기존 거래처 선택…</option>
+          ${regs.map(x => `<option value="${esc(x.code)}" ${best && best.code === x.code ? 'selected' : ''}>${x.s >= 10 ? '★ 추천 · ' : ''}${esc(x.name)} (${esc(x.owner)} · ${esc(x.code)})</option>`).join('')}
+        </select>
+        <button class="btn" style="padding:8px 14px" onclick="mergeCode('${esc(code)}', this)">기존 거래처에 합치기</button>
+      </div></div>`;
+  }
+  return '';
+}
+async function mergeCode(extra, btn) {
+  const main = document.getElementById('mergeTo').value;
+  if (!main) { toast('합칠 기존 거래처를 선택해 주세요.'); return; }
+  const m = state.dash.accounts.find(x => x.code === main);
+  if (!confirm(`코드 ${extra} 의 실적을 "${m.name}" 에 합칠까요?`)) return;
+  btn.disabled = true;
+  try {
+    await api('mergeAccountCode', main, extra);
+    toast('합쳤습니다. 실적이 한 거래처로 집계됩니다.');
+    closeModal();
+    await loadDashboard();
+    openAccount(main);
+  } catch (e) { toast('합치기 실패: ' + e.message); btn.disabled = false; }
+}
+async function linkCode(tmp, btn) {
+  const real = document.getElementById('lnkCode').value.trim();
+  if (!real) { toast('연결할 거래처코드를 고르거나 입력해 주세요.'); return; }
+  if (!confirm(`이 신규처를 거래처코드 ${real} 와 연결할까요?\n방문 기록이 모두 이 코드로 옮겨집니다.`)) return;
+  btn.disabled = true;
+  try {
+    const r = await api('linkAccountCode', tmp, real);
+    toast(`연결 완료 · 방문 기록 ${r.movedVisits}건 이동`);
+    closeModal();
+    state.boot = await api('getBootstrap'); fillAccountSelect();
+    await loadDashboard();
+    openAccount(r.code);
+  } catch (e) { toast('연결 실패: ' + e.message); btn.disabled = false; }
+}
+async function registerAccount(code, btn) {
+  const a = state.dash.accounts.find(x => x.code === code);
+  const owner = state.dash.staff.indexOf(a.owner) !== -1 ? a.owner : prompt('담당자 이름을 입력하세요', '');
+  if (!owner) return;
+  btn.disabled = true;
+  try {
+    await api('addAccount', { name: a.name, owner, code });
+    toast('거래처로 등록했습니다.');
+    closeModal();
+    state.boot = await api('getBootstrap'); fillAccountSelect();
+    await loadDashboard();
+  } catch (e) { toast('등록 실패: ' + e.message); btn.disabled = false; }
+}
+
+/* ======================= 방문 입력 ======================= */
+function initForm() {
+  const b = state.boot;
+  document.getElementById('vDate').value = b.today;
+  const vv = document.getElementById('vVisitor');
+  vv.innerHTML = '<option value="">선택</option>' + b.staff.map(s => `<option>${esc(s)}</option>`).join('');
+  const saved = store.get('gn2_visitor'); if (saved && b.staff.indexOf(saved) !== -1) vv.value = saved;
+  document.getElementById('vProducts').innerHTML = b.products.map(p => `<label><input type="checkbox" name="prod" value="${esc(p)}"><span>${esc(p)}</span></label>`).join('');
+  document.getElementById('vReaction').innerHTML = b.reactions.map(r => `<label><input type="radio" name="reaction" value="${esc(r)}" required><span>${{ '긍정': '✓', '보류': '◷', '거절': '✕' }[r] || ''} ${esc(r)}</span></label>`).join('');
+  document.getElementById('vComp').innerHTML = b.companions.map(c => `<label><input type="checkbox" name="comp" value="${esc(c)}"><span>${esc(c)}</span></label>`).join('');
+  fillAccountSelect();
+}
+function onVisitorChange() { store.set('gn2_visitor', document.getElementById('vVisitor').value); fillAccountSelect(); }
+function fillAccountSelect() {
+  const who = document.getElementById('vVisitor').value;
+  const all = document.getElementById('vAllAcc').checked || !who;
+  const list = state.boot.accounts.filter(a => all || (a.owner === who && a.type !== 'DCM')).sort((x, y) => x.name.localeCompare(y.name, 'ko'));
+  const sel = document.getElementById('vAccount');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">거래처 선택</option>' + list.map(a => `<option value="${esc(a.code)}">${esc(a.name)}${all ? ' (' + esc(a.owner) + ')' : ''}${a.type === 'DCM' ? ' · DCM' : ''}${a.code.indexOf('TMP-') === 0 ? ' · 신규' : ''}</option>`).join('');
+  if (list.some(a => a.code === cur)) sel.value = cur;
+  onAccountChange();
+}
+function toggleNewAcc() { document.getElementById('newAccBox').classList.toggle('hidden'); document.getElementById('naName').focus(); }
+async function createAccount(btn) {
+  const owner = document.getElementById('vVisitor').value;
+  const name = document.getElementById('naName').value.trim();
+  if (!owner) { toast('먼저 방문자(담당자)를 선택해 주세요.'); return; }
+  if (!name) { toast('거래처명을 입력해 주세요.'); return; }
+  btn.disabled = true;
+  try {
+    const acc = await api('addAccount', { name, owner, code: document.getElementById('naCode').value });
+    state.boot.accounts.push(acc);
+    document.getElementById('naName').value = ''; document.getElementById('naCode').value = '';
+    document.getElementById('newAccBox').classList.add('hidden');
+    fillAccountSelect();
+    document.getElementById('vAccount').value = acc.code; onAccountChange();
+    toast(`${acc.name} 등록 완료 (${acc.code})`);
+    loadDashboardSilently();
+  } catch (e) { toast('등록 실패: ' + e.message); }
+  btn.disabled = false;
+}
+async function onAccountChange() {
+  const code = document.getElementById('vAccount').value;
+  const box = document.getElementById('recentBox');
+  if (!code) { box.className = 'empty'; box.textContent = '거래처를 선택하면 최근 방문 기록이 여기 표시됩니다.'; return; }
+  box.className = ''; box.innerHTML = '<div class="loading" style="padding:30px 0"><div class="spinner"></div></div>';
+  try {
+    const det = await api('getAccountDetail', code);
+    if (document.getElementById('vAccount').value !== code) return;
+    const vs = det.visits.slice(0, 5);
+    box.innerHTML = vs.length ? '<div class="tl">' + vs.map(v => `<div class="tl-item"><div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}</div>
+      <div class="tl-body">${v.proposal ? '<div class="q">▶ ' + esc(v.proposal) + '</div>' : ''}${esc(v.result)}</div>
+      ${v.nextAction ? `<div class="tl-next">→ 다음: ${esc(v.nextAction)}</div>` : ''}</div>`).join('') + '</div>'
+      : '<div class="empty">아직 방문 기록이 없습니다.</div>';
+  } catch (e) { box.innerHTML = '<div class="empty">불러오기 실패</div>'; }
+}
+async function submitVisit(e) {
+  e.preventDefault();
+  const btn = document.getElementById('saveBtn');
+  const reaction = (document.querySelector('input[name=reaction]:checked') || {}).value;
+  if (!reaction) { toast('원장님 반응을 선택해 주세요.'); return; }
+  const p = {
+    date: document.getElementById('vDate').value,
+    visitor: document.getElementById('vVisitor').value,
+    code: document.getElementById('vAccount').value,
+    products: [...document.querySelectorAll('input[name=prod]:checked')].map(x => x.value),
+    proposal: document.getElementById('vProposal').value,
+    reaction,
+    result: document.getElementById('vResult').value,
+    nextAction: document.getElementById('vNext').value,
+    nextDate: document.getElementById('vNextDate').value,
+    companions: [...document.querySelectorAll('input[name=comp]:checked')].map(x => x.value)
+  };
+  btn.disabled = true; btn.textContent = '저장 중…';
+  try {
+    await api('saveVisit', p);
+    toast('저장했습니다 ✓');
+    ['vProposal', 'vResult', 'vNext', 'vNextDate'].forEach(id => document.getElementById(id).value = '');
+    document.querySelectorAll('#visitForm input[type=checkbox][name], #visitForm input[type=radio]').forEach(x => x.checked = false);
+    onAccountChange();
+    loadDashboardSilently();
+  } catch (err) { toast('저장 실패: ' + err.message); }
+  btn.disabled = false; btn.textContent = '저장';
+}
+async function loadDashboardSilently() {
+  try { state.dash = await api('getDashboard'); prepare(); fillFilters(); if (state.tab !== 'input') renderAll(); } catch (e) {}
+}
+</script>
+</body>
+</html>
