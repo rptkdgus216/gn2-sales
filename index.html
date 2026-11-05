@@ -219,9 +219,9 @@
   <!-- 다음 할일 -->
   <section id="tab-todo" class="hidden">
     <div class="card">
-      <h2>다음 할일 <span class="sub">거래처별 가장 최근 방문에 적힌 "다음 액션" 기준</span></h2>
+      <h2>다음 할일 <span class="sub">거래처별 가장 최근 방문에 적힌 "다음 액션" 기준 · 빨강 D+n 지남 · 노랑 7일 이내 · 초록 8일 이상 남음</span></h2>
       <div class="scroll"><table><thead><tr>
-        <th>예정일</th><th>상태</th><th>거래처</th><th>담당</th><th>다음 액션</th><th>마지막 방문</th>
+        <th>예정일</th><th>D-day</th><th>거래처</th><th>담당</th><th>다음 액션</th><th>마지막 방문</th>
       </tr></thead><tbody id="todoBody"></tbody></table></div>
     </div>
   </section>
@@ -571,12 +571,17 @@ function renderAccounts() {
 /* ======================= 다음 할일 ======================= */
 function renderTodo() {
   const d = state.dash, today = ymd(d.today);
-  const end = new Date(d.today); end.setDate(end.getDate() + 7); const weekEnd = ymd(end);
   const rows = filtered().map(a => ({ a, lv: d.lastVisit[a.code] })).filter(x => x.lv && x.lv.nextAction);
   rows.sort((x, y) => (x.lv.nextDate || '9999') < (y.lv.nextDate || '9999') ? -1 : 1);
   document.getElementById('todoBody').innerHTML = rows.length ? rows.map(({ a, lv }) => {
     const nd = lv.nextDate;
-    const st = !nd ? '<span class="chip none">날짜 없음</span>' : nd < today ? '<span class="chip 거절">✕ 지남</span>' : nd <= weekEnd ? '<span class="chip 보류">◷ 이번 주</span>' : '<span class="chip 긍정">예정</span>';
+    let st = '<span class="chip none">날짜 없음</span>';
+    if (nd) {
+      const diff = daysBetween(d.today, parseYmd(nd));        // 남은 일수 (음수 = 지남)
+      const label = diff === 0 ? 'D-Day' : diff > 0 ? 'D-' + diff : 'D+' + (-diff);
+      const cls = diff < 0 ? '거절' : diff <= 7 ? '보류' : '긍정';
+      st = `<span class="chip ${cls}" title="${diff < 0 ? (-diff) + '일 지남' : diff === 0 ? '오늘' : diff + '일 남음'}">${label}</span>`;
+    }
     return `<tr class="click" onclick="openAccount('${esc(a.code)}')"><td style="white-space:nowrap">${esc(nd || '-')}</td><td>${st}</td>
       <td class="acc-name">${esc(a.name)}</td><td>${esc(a.owner)}</td><td>${esc(lv.nextAction)}</td><td style="white-space:nowrap">${esc(lv.date)}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">등록된 다음 할일이 없습니다. 방문 입력 시 "다음 액션"을 적으면 여기에 모입니다.</td></tr>';
