@@ -64,8 +64,40 @@ var API_ = {
   updateAccountProfile: updateAccountProfile,
   addAccount: addAccount,
   linkAccountCode: linkAccountCode,
-  mergeAccountCode: mergeAccountCode
+  mergeAccountCode: mergeAccountCode,
+  adminRun: adminRun
 };
+
+/**
+ * 관리 작업을 API 로 실행 (편집기에서 함수를 직접 돌리지 않아도 됨). 사무소 비밀번호 필요.
+ * task: status | removeHwangDuplicate | setupSheets | previewMigration | migrateLegacy
+ */
+function adminRun(token, password, task) {
+  var real = PropertiesService.getScriptProperties().getProperty('OFFICE_PASSWORD');
+  var cache = CacheService.getScriptCache();
+  var fails = Number(cache.get('login_fails') || 0);
+  if (fails >= 10) throw new Error('로그인 실패가 많아 10분 동안 잠겼습니다.');
+  if (!real || String(password) !== String(real)) {
+    cache.put('login_fails', String(fails + 1), 600);
+    throw new Error('비밀번호가 올바르지 않습니다.');
+  }
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var info = {
+    spreadsheet: ss ? ss.getName() : null,
+    spreadsheetId: ss ? ss.getId() : null,
+    sheets: ss ? ss.getSheets().map(function (s) { return s.getName() + ' (' + s.getLastRow() + '행)'; }) : []
+  };
+  if (task === 'status') return info;
+  var tasks = {
+    removeHwangDuplicate: removeHwangDuplicate,
+    setupSheets: setupSheets,
+    previewMigration: previewMigration,
+    migrateLegacy: migrateLegacy
+  };
+  if (!Object.prototype.hasOwnProperty.call(tasks, task)) throw new Error('알 수 없는 작업입니다.');
+  tasks[task]();
+  return { log: Logger.getLog() };
+}
 
 function doPost(e) {
   var out;
