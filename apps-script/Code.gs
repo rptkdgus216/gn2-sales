@@ -42,12 +42,12 @@ var DEFAULT_STAFF = [
 /** [품목명, 별칭] — 품목 시트에서 언제든 수정 가능 */
 var DEFAULT_PRODUCTS = [
   ['펙수클루', '펙, 팩수'], ['바로에젯', '바로에, 바/, /바'], ['실리스칸', '실리, 실/, /실'], ['이스미젠', '이스미'],
-  ['웰체크', '웰만사, 웰체'], ['일만사', '웰만사'], ['이지에프', '이지에프MD'], ['옵티나', '옵티'],
+  ['웰체크', '웰만사, 웰체'], ['일만사', '웰만사'], ['옵티나', '옵티'],
   ['페라미빅트', ''], ['카트BP', ''], ['클린콜', ''], ['웨이메드 엔도', '웨이메드'],
   ['우루사', ''], ['스토보클로', '스토보'], ['엔블로', ''], ['나보타', ''], ['브리바탑', ''],
   ['코그테라', ''], ['루피어데포', '루피어'], ['오스테오시그널', ''], ['압솔라', ''],
   ['올메텍', '올메'], ['크레젯', ''], ['푸루나졸', ''], ['제미메트', ''], ['스피로킷', ''],
-  ['닥터빌', ''], ['이지듀', ''], ['리브레', ''], ['레가론', ''], ['피타바', ''],
+  ['닥터빌', ''], ['리브레', ''], ['이지에프MD스프레이', '이지에프MD, MD스프레이'], ['니어에이드', ''],
   ['글리아타민', ''], ['에티아', ''], ['thynC', '씽크'], ['e-DToD', '']
 ];
 
@@ -71,8 +71,9 @@ var API_ = {
 /**
  * 관리 작업을 API 로 실행 (편집기에서 함수를 직접 돌리지 않아도 됨). 사무소 비밀번호 필요.
  * task: status | removeHwangDuplicate | setupSheets | previewMigration | migrateLegacy
+ *       updateProducts (payload: { remove: ['품목명', …], add: [['품목명', '별칭'], …] })
  */
-function adminRun(token, password, task) {
+function adminRun(token, password, task, payload) {
   var real = PropertiesService.getScriptProperties().getProperty('OFFICE_PASSWORD');
   var cache = CacheService.getScriptCache();
   var fails = Number(cache.get('login_fails') || 0);
@@ -88,6 +89,7 @@ function adminRun(token, password, task) {
     sheets: ss ? ss.getSheets().map(function (s) { return s.getName() + ' (' + s.getLastRow() + '행)'; }) : []
   };
   if (task === 'status') return info;
+  if (task === 'updateProducts') return updateProducts_(payload || {});
   var tasks = {
     removeHwangDuplicate: removeHwangDuplicate,
     setupSheets: setupSheets,
@@ -410,6 +412,34 @@ function mergeAccountCode(token, mainCode, extraCode) {
   } finally {
     lock.releaseLock();
   }
+}
+
+/** 품목 비활성화(사용여부 N — 과거 기록은 그대로 유지)·추가·재활성화 */
+function updateProducts_(p) {
+  var t = readTable_(SHEETS.PRODUCT);
+  var nameCol = 1, aliasCol = 2, useCol = 3;
+  var byName = {};
+  t.rows.forEach(function (r) { byName[String(r[PRODUCT_HEADERS[0]]).trim()] = r; });
+  var done = [];
+  (p.remove || []).forEach(function (n) {
+    var r = byName[String(n).trim()];
+    if (r) { t.sheet.getRange(r._row, useCol).setValue('N'); done.push('삭제: ' + n); }
+    else done.push('없음(건너뜀): ' + n);
+  });
+  (p.add || []).forEach(function (a) {
+    var n = String(a[0]).trim(), alias = String(a[1] || '');
+    if (!n) return;
+    var r = byName[n];
+    if (r) {
+      t.sheet.getRange(r._row, useCol).setValue('Y');
+      if (alias) t.sheet.getRange(r._row, aliasCol).setValue(alias);
+      done.push('다시 사용: ' + n);
+    } else {
+      t.sheet.appendRow([n, alias, 'Y']);
+      done.push('추가: ' + n);
+    }
+  });
+  return { result: done, products: getProducts_().filter(function (x) { return x.active; }).map(function (x) { return x.name; }) };
 }
 
 function getProducts_() {
