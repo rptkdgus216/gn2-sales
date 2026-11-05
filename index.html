@@ -240,7 +240,7 @@
               <select id="vAccount" required onchange="onAccountChange()" style="flex:1"></select>
               <button type="button" class="btn ghost" style="padding:9px 12px;white-space:nowrap" onclick="toggleNewAcc()">+ 신규 거래처</button>
             </div>
-            <label class="hint"><input type="checkbox" id="vAllAcc" onchange="fillAccountSelect()"> 다른 담당자 거래처·DCM처도 보기 (동행·대리 방문)</label>
+            <label class="hint"><input type="checkbox" id="vAllAcc" onchange="fillAccountSelect()"> 다른 담당자 거래처·DCM처도 보기 (동도·대리 방문)</label>
             <div id="newAccBox" class="warnbox hidden" style="margin-top:8px">
               <b>신규 거래처 등록</b> <span class="hint">처방 전이라 거래처코드를 모르면 비워두세요. 나중에 실적이 나오면 거래처 상세 화면에서 연결합니다.</span>
               <div class="row-flex" style="margin-top:8px">
@@ -251,13 +251,13 @@
             </div>
           </div>
           <div class="field full"><label class="lbl">제안 품목</label><div class="checks" id="vProducts"></div></div>
-          <div class="field full"><label class="lbl" for="vProposal">제안 내용 (할일)</label><textarea id="vProposal" placeholder="예) 펙수클루 10mg 위염코드 안내 및 웰만사 등록 독려"></textarea></div>
+          <div class="field full"><label class="lbl" for="vProposal">제안 내용 (할일) <span class="req">*</span></label><textarea id="vProposal" required placeholder="예) 펙수클루 10mg 위염코드 안내 및 웰만사 등록 독려"></textarea></div>
           <div class="field full"><label class="lbl">원장님 반응 <span class="req">*</span></label>
             <div class="checks" id="vReaction"></div></div>
           <div class="field full"><label class="lbl" for="vResult">결과 / 원장님 코멘트 <span class="req">*</span></label><textarea id="vResult" required placeholder="원장님이 하신 말씀, 처방 의향, 거절 사유 등을 구체적으로 적을수록 AI 분석이 정확해집니다."></textarea></div>
-          <div class="field"><label class="lbl" for="vNext">다음 액션</label><input type="text" id="vNext" placeholder="예) 위염코드 근거자료 전달"></div>
-          <div class="field"><label class="lbl" for="vNextDate">다음 예정일</label><input type="date" id="vNextDate"></div>
-          <div class="field full"><label class="lbl">동행</label><div class="checks" id="vComp"></div></div>
+          <div class="field"><label class="lbl" for="vNext">다음 액션 <span class="req">*</span></label><input type="text" id="vNext" required placeholder="예) 위염코드 근거자료 전달"></div>
+          <div class="field"><label class="lbl" for="vNextDate">다음 예정일 <span class="req">*</span></label><input type="date" id="vNextDate" required></div>
+          <div class="field full"><label class="lbl">동도</label><div class="checks" id="vComp"></div></div>
           <div class="full row-flex"><button class="btn" id="saveBtn" type="submit">저장</button><span class="hint">저장하면 '방문기록' 시트에 한 줄로 쌓입니다.</span></div>
         </div>
       </form>
@@ -713,7 +713,7 @@ function renderDetail(code, a, det) {
         <div class="tl-item">
           <div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}
             ${v.products ? v.products.split(',').map(p => `<span class="tag">${esc(p.trim())}</span>`).join('') : ''}
-            ${v.companions ? `<span class="tag">동행: ${esc(v.companions)}</span>` : ''}
+            ${v.companions ? `<span class="tag">동도: ${esc(v.companions)}</span>` : ''}
             ${v.note ? `<span class="tag">${esc(v.note)}</span>` : ''}</div>
           <div class="tl-body">${v.proposal ? `<div class="q">▶ ${esc(v.proposal)}</div>` : ''}${esc(v.result)}</div>
           ${v.nextAction ? `<div class="tl-next">→ 다음: ${esc(v.nextAction)} ${v.nextDate ? '(' + esc(v.nextDate) + ')' : ''}</div>` : ''}
@@ -885,6 +885,9 @@ async function submitVisit(e) {
   const btn = document.getElementById('saveBtn');
   const reaction = (document.querySelector('input[name=reaction]:checked') || {}).value;
   if (!reaction) { toast('원장님 반응을 선택해 주세요.'); return; }
+  const need = [['vProposal', '제안 내용(할일)'], ['vResult', '결과 / 원장님 코멘트'], ['vNext', '다음 액션'], ['vNextDate', '다음 예정일']]
+    .filter(([id]) => !document.getElementById(id).value.trim());
+  if (need.length) { toast(need.map(x => x[1]).join(', ') + ' 을(를) 입력해 주세요.'); document.getElementById(need[0][0]).focus(); return; }
   const p = {
     date: document.getElementById('vDate').value,
     visitor: document.getElementById('vVisitor').value,
