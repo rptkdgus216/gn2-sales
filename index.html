@@ -53,6 +53,9 @@
   .kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .two { grid-template-columns: 3fr 2fr; }
   @media (max-width: 900px) { .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .two { grid-template-columns: 1fr; } }
+  .kpi.clickable { cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+  .kpi.clickable:hover { border-color: var(--brand); box-shadow: 0 2px 10px rgba(255,106,0,.12); }
+  .kpi .more { font-size: 11px; color: var(--brand-ink); font-weight: 700; margin-top: 6px; }
   .kpi .label { font-size: 12px; color: var(--text-2); font-weight: 700; }
   .kpi .val { font-size: 24px; font-weight: 900; margin-top: 6px; font-variant-numeric: tabular-nums; }
   .kpi .delta { font-size: 12px; margin-top: 4px; color: var(--text-2); }
@@ -175,8 +178,8 @@
     <div class="grid kpis">
       <div class="card kpi"><div class="label" id="k1l">최근월 실적</div><div class="val" id="k1">-</div><div class="delta" id="k1d"></div></div>
       <div class="card kpi"><div class="label" id="k2l">연간 누적 실적</div><div class="val" id="k2">-</div><div class="delta" id="k2d"></div></div>
-      <div class="card kpi"><div class="label">이번 달 방문</div><div class="val" id="k3">-</div><div class="delta" id="k3d"></div></div>
-      <div class="card kpi"><div class="label">30일 이상 미방문 거래처</div><div class="val" id="k4">-</div><div class="delta">DCM처 제외 · 거래처 탭 "미방문 오래된 순"</div></div>
+      <div class="card kpi clickable" role="button" tabindex="0" onclick="openVisitList()" onkeydown="if(event.key==='Enter')openVisitList()"><div class="label">이번 달 방문</div><div class="val" id="k3">-</div><div class="delta" id="k3d"></div><div class="more">▸ 방문 목록 보기</div></div>
+      <div class="card kpi clickable" role="button" tabindex="0" onclick="openStaleList()" onkeydown="if(event.key==='Enter')openStaleList()"><div class="label">30일 이상 미방문 거래처</div><div class="val" id="k4">-</div><div class="delta">DCM처 제외</div><div class="more">▸ 거래처 목록 보기</div></div>
     </div>
     <div class="grid two" style="margin-top:14px">
       <div class="card"><h2 id="c1t">월별 평가실적</h2><div class="chart-box"><canvas id="salesChart" aria-label="월별 평가실적 막대 차트"></canvas></div></div>
@@ -269,7 +272,7 @@
 <!-- 거래처 상세 -->
 <div id="modal" class="modal hidden" onclick="if(event.target===this)closeModal()">
   <div class="modal-box" role="dialog" aria-modal="true">
-    <div class="modal-head"><h3 id="mTitle">거래처</h3><button onclick="closeModal()" aria-label="닫기">&times;</button></div>
+    <div class="modal-head"><div class="row-flex" style="flex-wrap:nowrap"><button id="mBack" class="hidden" onclick="modalBack()" aria-label="목록으로" title="목록으로">‹</button><h3 id="mTitle">거래처</h3></div><button onclick="closeModal()" aria-label="닫기">&times;</button></div>
     <div class="modal-body" id="mBody"></div>
   </div>
 </div>
@@ -584,6 +587,7 @@ async function openAccount(code) {
   const modal = document.getElementById('modal');
   const a = state.dash.accounts.find(x => x.code === code) || { name: code, owner: '' };
   document.getElementById('mTitle').textContent = `🏥 ${a.name} · ${a.owner}`;
+  document.getElementById('mBack').classList.toggle('hidden', !state.modalBack);
   document.getElementById('mBody').innerHTML = '<div class="loading"><div class="spinner"></div>히스토리를 불러오는 중…</div>';
   modal.classList.remove('hidden');
   try {
@@ -591,8 +595,78 @@ async function openAccount(code) {
     renderDetail(code, a, det);
   } catch (e) { document.getElementById('mBody').innerHTML = '<div class="empty">불러오기 실패: ' + esc(e.message) + '</div>'; }
 }
-function closeModal() { document.getElementById('modal').classList.add('hidden'); if (state.charts.detailChart) { state.charts.detailChart.destroy(); delete state.charts.detailChart; } }
+function closeModal() { state.modalBack = null; document.getElementById('modal').classList.add('hidden'); if (state.charts.detailChart) { state.charts.detailChart.destroy(); delete state.charts.detailChart; } }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* ======================= KPI 클릭 → 목록 모달 ======================= */
+function modalBack() { const f = state.modalBack; if (state.charts.detailChart) { state.charts.detailChart.destroy(); delete state.charts.detailChart; } if (f) f(); }
+function openListModal(title, html, reopen) {
+  state.modalBack = reopen;
+  document.getElementById('mTitle').textContent = title;
+  document.getElementById('mBack').classList.add('hidden');
+  document.getElementById('mBody').innerHTML = html;
+  document.getElementById('modal').classList.remove('hidden');
+  document.querySelector('#modal .modal-box').scrollIntoView({ block: 'start' });
+}
+const whoLabel = () => state.manager === 'ALL' ? '사무소 전체' : state.manager;
+
+function openVisitList() {
+  if (!state.dash) return;
+  const d = state.dash, ym = ymOf(d.today);
+  const accs = filtered(), byCode = Object.fromEntries(accs.map(a => [a.code, a]));
+  const rows = d.visits.filter(v => byCode[v[2]] && v[0].slice(0, 7) === ym)
+    .sort((x, y) => x[0] < y[0] ? 1 : x[0] > y[0] ? -1 : byCode[x[2]].name.localeCompare(byCode[y[2]].name, 'ko'));
+  const perVisitor = {}, perReaction = { '긍정': 0, '보류': 0, '거절': 0, '': 0 };
+  rows.forEach(v => { perVisitor[v[1]] = (perVisitor[v[1]] || 0) + 1; perReaction[v[3] in perReaction ? v[3] : ''] += 1; });
+  const uniq = new Set(rows.map(v => v[2])).size;
+  const html = `
+    <div class="card">
+      <div class="row-flex">
+        <span class="tag">방문 ${rows.length}건 · 거래처 ${uniq}곳</span>
+        ${Object.entries(perVisitor).sort((x, y) => y[1] - x[1]).map(([n, c]) => `<span class="tag">${esc(n)} ${c}건</span>`).join('')}
+      </div>
+      <div class="row-flex" style="margin-top:8px">
+        <span class="chip 긍정">✓ 긍정 ${perReaction['긍정']}</span><span class="chip 보류">◷ 보류 ${perReaction['보류']}</span><span class="chip 거절">✕ 거절 ${perReaction['거절']}</span>
+        ${perReaction[''] ? `<span class="chip none">미분류 ${perReaction['']}</span>` : ''}
+      </div>
+    </div>
+    <div class="card">
+      <h2>방문 목록 <span class="sub">최신순 · 행을 누르면 거래처 전체 히스토리</span></h2>
+      <div class="scroll"><table><thead><tr><th>방문일</th><th>방문자</th><th>거래처</th><th>담당</th><th>반응</th><th>결과</th></tr></thead><tbody>
+      ${rows.length ? rows.map(v => {
+        const a = byCode[v[2]], lv = d.lastVisit[v[2]];
+        const same = lv && lv.date === v[0] && lv.visitor === v[1];
+        return `<tr class="click" onclick="openAccount('${esc(v[2])}')">
+          <td style="white-space:nowrap">${esc(v[0].slice(5).replace('-', '/'))}</td><td style="white-space:nowrap">${esc(v[1])}</td>
+          <td class="acc-name">${esc(a.name)}</td><td style="white-space:nowrap">${esc(a.owner)}</td><td>${chip(v[3])}</td>
+          <td class="truncate" title="${esc(same ? lv.result : '')}">${same ? esc(lv.result) : '<span class="hint">누르면 내용 보기</span>'}</td></tr>`;
+      }).join('') : '<tr><td colspan="6" class="empty">이번 달 방문 기록이 없습니다.</td></tr>'}
+      </tbody></table></div>
+    </div>`;
+  openListModal(`📅 ${ymLabel(ym)} 방문 · ${whoLabel()}`, html, openVisitList);
+}
+
+function openStaleList() {
+  if (!state.dash) return;
+  const d = state.dash, L = d.latestYm;
+  const list = filtered().filter(a => a.visitTarget && a.staleDays >= 30).sort((x, y) => y.staleDays - x.staleDays);
+  const html = `
+    <div class="card">
+      <h2>30일 이상 미방문 거래처 ${list.length}곳 <span class="sub">DCM처 제외 · 오래된 순 · 행을 누르면 거래처 상세</span></h2>
+      <div class="scroll"><table><thead><tr><th>거래처</th><th>담당</th><th>마지막 방문</th><th class="num">경과</th><th class="num">${ymLabel(L)} 실적</th><th>마지막 반응</th><th>마지막 결과</th></tr></thead><tbody>
+      ${list.length ? list.map(a => {
+        const lv = d.lastVisit[a.code];
+        return `<tr class="click" onclick="openAccount('${esc(a.code)}')">
+          <td class="acc-name">${esc(a.name)}</td><td style="white-space:nowrap">${esc(a.owner)}</td>
+          <td style="white-space:nowrap">${lv ? esc(lv.date) : '<span class="chip none">기록 없음</span>'}</td>
+          <td class="num">${a.staleDays >= 9999 ? '-' : '<span class="chip 거절">' + a.staleDays + '일</span>'}</td>
+          <td class="num">${won(a.sales[L])}</td><td>${lv ? chip(lv.reaction) : ''}</td>
+          <td class="truncate" title="${esc(lv ? lv.result : '')}">${esc(lv ? lv.result : '')}</td></tr>`;
+      }).join('') : '<tr><td colspan="7" class="empty">30일 이상 미방문 거래처가 없습니다. 👍</td></tr>'}
+      </tbody></table></div>
+    </div>`;
+  openListModal(`⏰ 30일 이상 미방문 · ${whoLabel()}`, html, openStaleList);
+}
 
 function renderDetail(code, a, det) {
   const acc = det.account || {};
