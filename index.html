@@ -136,6 +136,37 @@
   .login-box .btn { width: 100%; }
   .err { color: var(--bad); font-size: 13px; min-height: 18px; margin-top: 6px; }
 
+  /* ===== 모바일: 표 → 카드 ===== */
+  @media (max-width: 700px) {
+    .wrap { padding: 12px; }
+    .top { padding: 12px 14px; }
+    .top h1 { font-size: 16px; }
+    .card { padding: 12px; }
+    .kpi .val { font-size: 20px; }
+    .scroll { border: 0; max-height: none; overflow: visible; }
+    table.resp thead { display: none; }
+    table.resp, table.resp tbody { display: block; width: 100%; }
+    table.resp tr { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 12px;
+      margin: 0 0 10px; padding: 10px 14px; background: var(--surface); }
+    table.resp td { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+      border: 0; padding: 4px 0; text-align: right; white-space: normal !important; max-width: none; }
+    table.resp td::before { content: attr(data-label); flex: none; color: var(--text-2); font-size: 12px; font-weight: 700;
+      text-align: left; padding-top: 2px; }
+    table.resp td:empty { display: none; }
+    table.resp td[colspan] { justify-content: center; }
+    table.resp td[colspan]::before { content: none; }
+    table.resp td.truncate { overflow: visible; text-overflow: clip; text-align: left; }
+    /* 카드 제목: 거래처명 (담당자 요약 표는 첫 칸) */
+    table.resp td.acc-name, table.resp td:has(> .acc-name), table.resp.fp td:first-child {
+      order: -1; font-size: 16px; font-weight: 800; text-align: left; justify-content: flex-start; flex-wrap: wrap;
+      padding-bottom: 8px; margin-bottom: 4px; border-bottom: 1px dashed var(--border); }
+    table.resp td.acc-name::before, table.resp td:has(> .acc-name)::before, table.resp.fp td:first-child::before { content: none; }
+    tr.click:hover td { background: transparent; }
+    .modal { padding: 0; }
+    .modal-box { border-radius: 0; min-height: 100%; }
+    .modal-body { padding: 10px; }
+    .toolbar input { min-width: 0; width: 100%; flex-basis: 100%; }
+  }
   .loading { text-align: center; padding: 80px 0; color: var(--text-2); }
   .spinner { width: 34px; height: 34px; border: 4px solid var(--border); border-top-color: var(--brand); border-radius: 50%; margin: 0 auto 12px; animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
@@ -195,7 +226,7 @@
     </div>
     <div class="card" style="margin-top:14px">
       <h2>담당자별 요약</h2>
-      <div class="scroll" style="max-height:none"><table><thead><tr>
+      <div class="scroll" style="max-height:none"><table class="resp fp"><thead><tr>
         <th>담당자</th><th class="num">방문처</th><th class="num" id="thLatest">최근월 실적</th><th class="num">전월 대비</th>
         <th class="num">연간 누적</th><th class="num">이번 달 방문</th><th class="num">거래처당 월평균 방문</th><th class="num">30일+ 미방문</th>
       </tr></thead><tbody id="staffBody"></tbody></table></div>
@@ -207,8 +238,8 @@
   <section id="tab-accounts" class="hidden">
     <div class="card">
       <div class="toolbar">
-        <input id="q" type="search" placeholder="거래처명 · 품목 · 성향태그 검색" oninput="renderAccounts()">
-        <select id="sortBy" onchange="renderAccounts()">
+        <input id="q" type="search" placeholder="거래처명 · 품목 · 성향태그 검색" oninput="renderAll()">
+        <select id="sortBy" onchange="renderAll()">
           <option value="sales">최근월 실적 높은 순</option>
           <option value="drop">전월 대비 하락 큰 순</option>
           <option value="stale">미방문 오래된 순</option>
@@ -217,8 +248,8 @@
         </select>
         <span class="tag" id="accCount"></span>
       </div>
-      <div class="scroll"><table><thead><tr>
-        <th>거래처</th><th>담당</th><th>집중품목 / 성향</th><th class="num" id="thM2"></th><th class="num" id="thM1"></th><th class="num" id="thM0"></th>
+      <div class="scroll"><table class="resp"><thead><tr>
+        <th>거래처</th><th>담당자</th><th>집중품목 / 성향</th><th class="num" id="thM2"></th><th class="num" id="thM1"></th><th class="num" id="thM0"></th>
         <th class="num">전월 대비</th><th>마지막 방문</th><th class="num">연간 방문</th><th>최근 반응</th><th>최근 결과</th>
       </tr></thead><tbody id="accBody"></tbody></table></div>
     </div>
@@ -228,8 +259,8 @@
   <section id="tab-todo" class="hidden">
     <div class="card">
       <h2>다음 할일 <span class="sub">거래처별 가장 최근 방문에 적힌 "다음 액션" 기준 · 빨강 D+n 지남 · 노랑 7일 이내 · 초록 8일 이상 남음</span></h2>
-      <div class="scroll"><table><thead><tr>
-        <th>예정일</th><th>D-day</th><th>거래처</th><th>담당</th><th>다음 액션</th><th>마지막 방문</th>
+      <div class="scroll"><table class="resp"><thead><tr>
+        <th>예정일</th><th>D-day</th><th>거래처</th><th>담당자</th><th>다음 액션</th><th>마지막 방문</th>
       </tr></thead><tbody id="todoBody"></tbody></table></div>
     </div>
   </section>
@@ -432,6 +463,14 @@ function fillFilters() {
 
 const filtered = () => state.dash.accounts.filter(a => state.manager === 'ALL' || a.owner === state.manager);
 
+/** 모바일 카드 보기용: 각 칸에 열 제목(data-label)을 붙임 */
+function labelize(root) {
+  (root || document).querySelectorAll('table.resp').forEach(t => {
+    const hs = [...t.querySelectorAll('thead th')].map(th => th.textContent.trim());
+    t.querySelectorAll('tbody tr').forEach(tr => [...tr.children].forEach((td, i) => { if (!td.hasAttribute('colspan')) td.dataset.label = hs[i] || ''; }));
+  });
+}
+
 /* ======================= 탭 ======================= */
 function showTab(t) {
   state.tab = t;
@@ -446,6 +485,7 @@ function renderAll() {
   if (state.tab === 'home') renderHome();
   if (state.tab === 'accounts') renderAccounts();
   if (state.tab === 'todo') renderTodo();
+  labelize(document);
 }
 
 /* ======================= 현황 ======================= */
@@ -591,7 +631,7 @@ function renderTodo() {
       st = `<span class="chip ${cls}" title="${diff < 0 ? (-diff) + '일 지남' : diff === 0 ? '오늘' : diff + '일 남음'}">${label}</span>`;
     }
     return `<tr class="click" onclick="openAccount('${esc(a.code)}')"><td style="white-space:nowrap">${esc(nd || '-')}</td><td>${st}</td>
-      <td class="acc-name">${esc(a.name)}</td><td>${esc(a.owner)}</td><td>${esc(lv.nextAction)}</td><td style="white-space:nowrap">${esc(lv.date)}</td></tr>`;
+      <td class="acc-name">${esc(a.name)}</td><td style="white-space:nowrap">${esc(a.owner)}</td><td>${esc(lv.nextAction)}</td><td style="white-space:nowrap">${esc(lv.date)}</td></tr>`;
   }).join('') : '<tr><td colspan="6" class="empty">등록된 다음 할일이 없습니다. 방문 입력 시 "다음 액션"을 적으면 여기에 모입니다.</td></tr>';
 }
 
@@ -618,6 +658,7 @@ function openListModal(title, html, reopen) {
   document.getElementById('mTitle').textContent = title;
   document.getElementById('mBack').classList.add('hidden');
   document.getElementById('mBody').innerHTML = html;
+  labelize(document.getElementById('mBody'));
   document.getElementById('modal').classList.remove('hidden');
   document.querySelector('#modal .modal-box').scrollIntoView({ block: 'start' });
 }
@@ -645,7 +686,7 @@ function openVisitList() {
     </div>
     <div class="card">
       <h2>방문 목록 <span class="sub">최신순 · 행을 누르면 거래처 전체 히스토리</span></h2>
-      <div class="scroll"><table><thead><tr><th>방문일</th><th>방문자</th><th>거래처</th><th>담당</th><th>반응</th><th>결과</th></tr></thead><tbody>
+      <div class="scroll"><table class="resp"><thead><tr><th>방문일</th><th>방문자</th><th>거래처</th><th>담당자</th><th>반응</th><th>결과</th></tr></thead><tbody>
       ${rows.length ? rows.map(v => {
         const a = byCode[v[2]], lv = d.lastVisit[v[2]];
         const same = lv && lv.date === v[0] && lv.visitor === v[1];
@@ -666,7 +707,7 @@ function openStaleList() {
   const html = `
     <div class="card">
       <h2>30일 이상 미방문 거래처 ${list.length}곳 <span class="sub">DCM처 제외 · 오래된 순 · 행을 누르면 거래처 상세</span></h2>
-      <div class="scroll"><table><thead><tr><th>거래처</th><th>담당</th><th>마지막 방문</th><th class="num">경과</th><th class="num">${ymLabel(L)} 실적</th><th>마지막 반응</th><th>마지막 결과</th></tr></thead><tbody>
+      <div class="scroll"><table class="resp"><thead><tr><th>거래처</th><th>담당자</th><th>마지막 방문</th><th class="num">경과</th><th class="num">${ymLabel(L)} 실적</th><th>마지막 반응</th><th>마지막 결과</th></tr></thead><tbody>
       ${list.length ? list.map(a => {
         const lv = d.lastVisit[a.code];
         return `<tr class="click" onclick="openAccount('${esc(a.code)}')">
