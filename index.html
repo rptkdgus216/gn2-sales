@@ -318,7 +318,7 @@
 
 <script>
 /* ======================= 상태 ======================= */
-const state = { token: null, boot: null, dash: null, manager: 'ALL', year: null, tab: 'home', charts: {} };
+const state = { token: null, boot: null, dash: null, manager: 'ALL', year: null, tab: 'home', charts: {}, detailCache: {} };
 const store = {
   get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} },
@@ -361,17 +361,48 @@ async function doLogin(e) {
   btn.disabled = false;
 }
 function logout(msg) {
-  store.del('gn2_token'); state.token = null;
+  store.del('gn2_token'); store.del('gn2_cache'); state.token = null; state.detailCache = {};
   document.getElementById('login').classList.remove('hidden');
   if (msg) document.getElementById('loginErr').textContent = msg;
 }
 async function start() {
   document.getElementById('login').classList.add('hidden');
+  // 1) 이 기기에 저장된 지난 데이터가 있으면 즉시 표시
+  let shown = false;
   try {
-    state.boot = await api('getBootstrap');
-    initForm();
-    await loadDashboard();
+    const c = JSON.parse(store.get('gn2_cache') || 'null');
+    if (c && c.boot && c.dash) {
+      state.boot = c.boot; state.dash = c.dash;
+      initForm(); prepare(); fillFilters();
+      document.getElementById('loading').classList.add('hidden');
+      showTab(state.tab); setGenAt(true);
+      shown = true;
+    }
+  } catch (e) {}
+  // 2) 서버에서 최신 데이터를 동시에 받아와 교체
+  try {
+    const [boot, dash] = await Promise.all([api('getBootstrap'), api('getDashboard')]);
+    state.boot = boot;
+    if (shown) refreshFormLists(); else initForm();
+    applyDash(dash);
+    saveLocal();
   } catch (e) { if (state.token) toast('불러오기 실패: ' + e.message); }
+}
+function saveLocal() { try { store.set('gn2_cache', JSON.stringify({ boot: state.boot, dash: state.dash })); } catch (e) {} }
+function setGenAt(stale) {
+  document.getElementById('genAt').textContent = (stale ? '저장된 화면 · 최신 데이터 불러오는 중… · ' : '기준 시각 ') + state.dash.generatedAt + ' · 방문기록 ' + state.dash.visits.length.toLocaleString() + '건';
+}
+function applyDash(dash) {
+  state.dash = dash; state.detailCache = {};
+  prepare(); fillFilters(); setGenAt(false);
+  document.getElementById('loading').classList.add('hidden');
+  showTab(state.tab);
+}
+/** 방문 입력 화면이 이미 그려져 있을 때: 입력 중인 값은 두고 거래처 목록만 갱신 */
+function refreshFormLists() {
+  const keep = document.getElementById('vAccount').value;
+  fillAccountSelect();
+  if (keep && state.boot.accounts.some(a => a.code === keep)) document.getElementById('vAccount').value = keep;
 }
 window.addEventListener('DOMContentLoaded', () => {
   const t = store.get('gn2_token');
@@ -409,12 +440,8 @@ async function loadDashboard(force) {
   document.getElementById('loading').classList.remove('hidden');
   document.querySelectorAll('section').forEach(s => s.classList.add('hidden'));
   try {
-    state.dash = await api('getDashboard');
-    prepare();
-    fillFilters();
-    document.getElementById('genAt').textContent = '기준 시각 ' + state.dash.generatedAt + ' · 방문기록 ' + state.dash.visits.length.toLocaleString() + '건';
-    document.getElementById('loading').classList.add('hidden');
-    showTab(state.tab);
+    applyDash(await api('getDashboard', !!force));
+    saveLocal();
     if (force) toast('최신 데이터로 갱신했습니다.');
   } catch (e) {
     document.getElementById('loading').innerHTML = '데이터를 불러오지 못했습니다.<br><small>' + esc(e.message) + '</small>';
@@ -644,7 +671,7 @@ async function openAccount(code) {
   document.getElementById('mBody').innerHTML = '<div class="loading"><div class="spinner"></div>히스토리를 불러오는 중…</div>';
   modal.classList.remove('hidden');
   try {
-    const det = await api('getAccountDetail', code);
+    const det = await getDetail(code);
     renderDetail(code, a, det);
   } catch (e) { document.getElementById('mBody').innerHTML = '<div class="empty">불러오기 실패: ' + esc(e.message) + '</div>'; }
 }
@@ -783,6 +810,7 @@ async function saveProfile(code, btn) {
   try {
     const profile = { type: document.getElementById('pType').value, dept: document.getElementById('pDept').value, tags: document.getElementById('pTags').value, memo: document.getElementById('pMemo').value };
     await api('updateAccountProfile', code, profile);
+    if (state.detailCache) delete state.detailCache[code];
     const a = state.dash.accounts.find(x => x.code === code);
     if (a) { a.dept = profile.dept; a.tags = profile.tags; a.type = profile.type; }
     const b = state.boot.accounts.find(x => x.code === code);
@@ -925,7 +953,7 @@ async function onAccountChange() {
   if (!code) { box.className = 'empty'; box.textContent = '거래처를 선택하면 최근 방문 기록이 여기 표시됩니다.'; return; }
   box.className = ''; box.innerHTML = '<div class="loading" style="padding:30px 0"><div class="spinner"></div></div>';
   try {
-    const det = await api('getAccountDetail', code);
+    const det = await getDetail(code);
     if (document.getElementById('vAccount').value !== code) return;
     const vs = det.visits.slice(0, 5);
     box.innerHTML = vs.length ? '<div class="tl">' + vs.map(v => `<div class="tl-item"><div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}</div>
@@ -960,13 +988,26 @@ async function submitVisit(e) {
     toast('저장했습니다 ✓');
     ['vProposal', 'vResult', 'vNext', 'vNextDate'].forEach(id => document.getElementById(id).value = '');
     document.querySelectorAll('#visitForm input[type=checkbox][name], #visitForm input[type=radio]').forEach(x => x.checked = false);
+    state.detailCache = {};
     onAccountChange();
     loadDashboardSilently();
   } catch (err) { toast('저장 실패: ' + err.message); }
   btn.disabled = false; btn.textContent = '저장';
 }
 async function loadDashboardSilently() {
-  try { state.dash = await api('getDashboard'); prepare(); fillFilters(); if (state.tab !== 'input') renderAll(); } catch (e) {}
+  try {
+    state.dash = await api('getDashboard'); state.detailCache = {};
+    prepare(); fillFilters(); setGenAt(false); saveLocal();
+    if (state.tab !== 'input') renderAll();
+  } catch (e) {}
+}
+/** 거래처 상세: 한 번 본 거래처는 다시 받지 않음 (저장·새로고침 시 초기화) */
+async function getDetail(code) {
+  state.detailCache = state.detailCache || {};
+  if (state.detailCache[code]) return state.detailCache[code];
+  const det = await api('getAccountDetail', code);
+  state.detailCache[code] = det;
+  return det;
 }
 </script>
 </body>

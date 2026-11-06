@@ -89,7 +89,7 @@ function adminRun(token, password, task, payload) {
     sheets: ss ? ss.getSheets().map(function (s) { return s.getName() + ' (' + s.getLastRow() + '행)'; }) : []
   };
   if (task === 'status') return info;
-  if (task === 'updateProducts') return updateProducts_(payload || {});
+  if (task === 'updateProducts') { var up = updateProducts_(payload || {}); bumpCache_(); return up; }
   var tasks = {
     removeHwangDuplicate: removeHwangDuplicate,
     setupSheets: setupSheets,
@@ -98,6 +98,7 @@ function adminRun(token, password, task, payload) {
   };
   if (!Object.prototype.hasOwnProperty.call(tasks, task)) throw new Error('알 수 없는 작업입니다.');
   tasks[task]();
+  bumpCache_();
   return { log: Logger.getLog() };
 }
 
@@ -150,31 +151,119 @@ function requireAuth_(token) {
 /** 처음 접속 시: 입력 폼과 필터에 필요한 기본 목록 */
 function getBootstrap(token) {
   requireAuth_(token);
-  var staff = getStaff_();
-  return {
-    staff: staff.names,
-    products: getProducts_().filter(function (p) { return p.active; }).map(function (p) { return p.name; }),
-    accounts: getAccounts_().map(function (a) { return { code: a.code, name: a.name, owner: a.owner, type: a.type }; }),
-    reactions: REACTIONS,
-    companions: COMPANIONS,
-    today: fmtDate_(new Date())
-  };
+  var b = cachedData_(false).boot;
+  b.today = fmtDate_(new Date());
+  return b;
 }
 
-/** 대시보드 전체 데이터 (방문 본문 제외 — 상세는 getAccountDetail) */
-function getDashboard(token) {
+/**
+ * 대시보드 전체 데이터 (방문 본문 제외 — 상세는 getAccountDetail)
+ * force: true 면 캐시를 무시하고 시트를 새로 읽음 (화면의 🔄 새로고침 버튼)
+ */
+function getDashboard(token, force) {
   requireAuth_(token);
+  return cachedData_(!!force).dash;
+}
+
+/** 거래처 1곳의 전체 히스토리 (캐시에서 꺼냄) */
+function getAccountDetail(token, code) {
+  requireAuth_(token);
+  code = String(code);
+  var d = cachedData_(false).detail;
+  var visits = (d.visitsByCode[code] || []).slice();
+  visits.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
+  return { account: d.accountsByCode[code] || null, visits: visits, sales: d.salesByCode[code] || {} };
+}
+
+/* =========================== 캐시 =========================== */
+/*  시트를 매번 읽으면 10초 이상 걸려서, 계산 결과를 압축해 CacheService 에 보관합니다.
+ *  - 앱에서 저장·수정하면 즉시 비움 (bumpCache_)
+ *  - 시트를 직접 고친 경우(평가실적 붙여넣기 등)는 최대 CACHE_TTL 초 뒤 또는 🔄 새로고침 때 반영  */
+
+var CACHE_TTL = 600;           // 10분
+var CACHE_CHUNK = 90000;       // CacheService 값 1개 최대 100KB
+
+function cacheVersion_() {
+  var c = CacheService.getScriptCache();
+  var v = c.get('data_ver');
+  if (!v) { v = String(Date.now()); c.put('data_ver', v, 21600); }
+  return v;
+}
+
+function bumpCache_() {
+  CacheService.getScriptCache().put('data_ver', String(Date.now()), 21600);
+}
+
+function cachePutBig_(key, obj) {
+  try {
+    var gz = Utilities.gzip(Utilities.newBlob(JSON.stringify(obj), 'application/json'));
+    var b64 = Utilities.base64Encode(gz.getBytes());
+    var n = Math.ceil(b64.length / CACHE_CHUNK);
+    if (n > 80) return;
+    var m = {};
+    for (var i = 0; i < n; i++) m[key + '_' + i] = b64.substr(i * CACHE_CHUNK, CACHE_CHUNK);
+    m[key + '_n'] = String(n);
+    CacheService.getScriptCache().putAll(m, CACHE_TTL);
+  } catch (e) { /* 캐시 실패는 무시 (다음 요청에서 다시 계산) */ }
+}
+
+function cacheGetBig_(key) {
+  try {
+    var c = CacheService.getScriptCache();
+    var n = Number(c.get(key + '_n') || 0);
+    if (!n) return null;
+    var keys = [];
+    for (var i = 0; i < n; i++) keys.push(key + '_' + i);
+    var got = c.getAll(keys), b64 = '';
+    for (var j = 0; j < n; j++) { if (got[keys[j]] == null) return null; b64 += got[keys[j]]; }
+    var blob = Utilities.newBlob(Utilities.base64Decode(b64), 'application/x-gzip');
+    return JSON.parse(Utilities.ungzip(blob).getDataAsString('UTF-8'));
+  } catch (e) { return null; }
+}
+
+/** 캐시에 있으면 꺼내고, 없으면 시트를 읽어 계산한 뒤 저장 */
+function cachedData_(force) {
+  var ver = cacheVersion_();
+  if (!force) {
+    var dash = cacheGetBig_('dash_' + ver), boot = cacheGetBig_('boot_' + ver), detail = cacheGetBig_('det_' + ver);
+    if (dash && boot && detail) return { dash: dash, boot: boot, detail: detail };
+  } else {
+    bumpCache_(); ver = cacheVersion_();
+  }
+  // 동시에 들어온 요청이 같은 계산을 두 번 하지 않도록 잠금 후 한 번 더 확인
+  var lock = LockService.getScriptLock();
+  var locked = lock.tryLock(30000);
+  try {
+    if (locked && !force) {
+      var d2 = cacheGetBig_('dash_' + ver), b2 = cacheGetBig_('boot_' + ver), t2 = cacheGetBig_('det_' + ver);
+      if (d2 && b2 && t2) return { dash: d2, boot: b2, detail: t2 };
+    }
+    var data = buildData_();
+    cachePutBig_('dash_' + ver, data.dash);
+    cachePutBig_('boot_' + ver, data.boot);
+    cachePutBig_('det_' + ver, data.detail);
+    return data;
+  } finally {
+    if (locked) lock.releaseLock();
+  }
+}
+
+/** 시트 전체를 읽어 화면에 필요한 데이터를 한 번에 계산 */
+function buildData_() {
   var staff = getStaff_();
   var accounts = getAccounts_();
   var sales = readSales_(staff.alias);
   var visits = readVisits_();
 
-  var byCode = {};
+  var byCode = {}, accountsByCode = {}, salesByCode = {};
   accounts.forEach(function (a) {
+    var sa = accountSales_(a, sales.byCode);
     byCode[a.code] = {
       code: a.code, name: a.name, owner: a.owner, type: a.type, dept: a.dept, focus: a.focus,
-      tags: a.tags, extraCodes: a.extraCodes, sales: accountSales_(a, sales.byCode), registered: true
+      tags: a.tags, extraCodes: a.extraCodes, sales: sa, registered: true
     };
+    accountsByCode[a.code] = a;
+    salesByCode[a.code] = sa;
   });
   var used = usedCodes_(accounts);
   // 평가실적에는 있지만 거래처 시트에 없는 곳 (합계가 본사 자료와 맞도록 포함)
@@ -185,12 +274,13 @@ function getDashboard(token) {
       code: code, name: info.name || code, owner: info.owner || '(미지정)', type: '방문처', dept: '', focus: '',
       tags: '', sales: sales.byCode[code], registered: false
     };
+    salesByCode[code] = sales.byCode[code];
   });
 
-  var light = [];
-  var last = {};
+  var light = [], last = {}, visitsByCode = {};
   visits.forEach(function (v) {
     light.push([v.date, v.visitor, v.code, v.reaction]);
+    (visitsByCode[v.code] = visitsByCode[v.code] || []).push(v);
     var cur = last[v.code];
     if (!cur || v.date >= cur.date) {
       last[v.code] = {
@@ -201,24 +291,23 @@ function getDashboard(token) {
   });
 
   return {
-    accounts: Object.keys(byCode).map(function (k) { return byCode[k]; }),
-    visits: light,                 // [date, visitor, code, reaction]
-    lastVisit: last,
-    staff: staff.names,
-    warnings: sales.warnings,
-    generatedAt: Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm')
+    dash: {
+      accounts: Object.keys(byCode).map(function (k) { return byCode[k]; }),
+      visits: light,                 // [date, visitor, code, reaction]
+      lastVisit: last,
+      staff: staff.names,
+      warnings: sales.warnings,
+      generatedAt: Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm')
+    },
+    boot: {
+      staff: staff.names,
+      products: getProducts_().filter(function (p) { return p.active; }).map(function (p) { return p.name; }),
+      accounts: accounts.map(function (a) { return { code: a.code, name: a.name, owner: a.owner, type: a.type }; }),
+      reactions: REACTIONS,
+      companions: COMPANIONS
+    },
+    detail: { visitsByCode: visitsByCode, accountsByCode: accountsByCode, salesByCode: salesByCode }
   };
-}
-
-/** 거래처 1곳의 전체 히스토리 */
-function getAccountDetail(token, code) {
-  requireAuth_(token);
-  code = String(code);
-  var acc = getAccounts_().filter(function (a) { return a.code === code; })[0] || null;
-  var visits = readVisits_().filter(function (v) { return v.code === code; });
-  visits.sort(function (a, b) { return a.date < b.date ? 1 : a.date > b.date ? -1 : 0; });
-  var sales = readSales_(getStaff_().alias);
-  return { account: acc, visits: visits, sales: acc ? accountSales_(acc, sales.byCode) : (sales.byCode[code] || {}) };
 }
 
 /** 방문 기록 저장 */
@@ -253,6 +342,7 @@ function saveVisit(token, p) {
     var r = sh.getLastRow();
     sh.getRange(r, 2).setNumberFormat('yyyy-mm-dd');
     sh.getRange(r, 11).setNumberFormat('yyyy-mm-dd');
+    bumpCache_();
     return id;
   } finally {
     lock.releaseLock();
@@ -273,6 +363,7 @@ function updateAccountProfile(token, code, profile) {
   set('진료과', profile.dept);
   set('성향태그', profile.tags);
   set('메모', profile.memo);
+  bumpCache_();
   return true;
 }
 
@@ -303,6 +394,7 @@ function addAccount(token, p) {
     var values = { '거래처코드': code, '거래처명': name, '담당자': p.owner, '구분': type, '사용여부': 'Y' };
     t.sheet.appendRow(t.headers.map(function (h) { return values[h] || ''; }));
     t.sheet.getRange(t.sheet.getLastRow(), t.headers.indexOf('거래처코드') + 1).setNumberFormat('@').setValue(code);
+    bumpCache_();
     return { code: code, name: name, owner: p.owner, type: type };
   } finally {
     lock.releaseLock();
@@ -339,6 +431,7 @@ function linkAccountCode(token, tmpCode, realCode) {
       });
       if (moved) col.setValues(vals);
     }
+    bumpCache_();
     return { code: realCode, movedVisits: moved };
   } finally {
     lock.releaseLock();
@@ -411,6 +504,7 @@ function mergeAccountCode(token, mainCode, extraCode) {
     var cur = String(row['추가코드'] || '').split(',').map(function (x) { return x.trim(); }).filter(String);
     cur.push(extraCode);
     t.sheet.getRange(row._row, c + 1).setNumberFormat('@').setValue(cur.join(', '));
+    bumpCache_();
     return true;
   } finally {
     lock.releaseLock();
