@@ -180,7 +180,7 @@ function getAccountDetail(token, code) {
  *  - 앱에서 저장·수정하면 즉시 비움 (bumpCache_)
  *  - 시트를 직접 고친 경우(평가실적 붙여넣기 등)는 최대 CACHE_TTL 초 뒤 또는 🔄 새로고침 때 반영  */
 
-var CACHE_TTL = 600;           // 10분
+var CACHE_TTL = 1800;          // 30분 (예약 실행이 5분마다 새로 만듦)
 var CACHE_CHUNK = 90000;       // CacheService 값 1개 최대 100KB
 
 function cacheVersion_() {
@@ -245,6 +245,61 @@ function cachedData_(force) {
     return data;
   } finally {
     if (locked) lock.releaseLock();
+  }
+}
+
+/** 방문 저장 후: 캐시를 통째로 비우지 않고 새 기록 한 줄만 덧붙임 (다음 사람이 기다리지 않도록) */
+function patchCacheAfterSave_(v) {
+  try {
+    var ver = cacheVersion_();
+    var dash = cacheGetBig_('dash_' + ver), det = cacheGetBig_('det_' + ver);
+    if (!dash || !det) { bumpCache_(); return; }
+    dash.visits.push([v.date, v.visitor, v.code, v.reaction]);
+    var cur = dash.lastVisit[v.code];
+    if (!cur || v.date >= cur.date) {
+      dash.lastVisit[v.code] = { date: v.date, visitor: v.visitor, reaction: v.reaction,
+        result: v.result.slice(0, 140), nextAction: v.nextAction, nextDate: v.nextDate };
+    }
+    dash.generatedAt = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
+    (det.visitsByCode[v.code] = det.visitsByCode[v.code] || []).push(v);
+    cachePutBig_('dash_' + ver, dash);
+    cachePutBig_('det_' + ver, det);
+  } catch (e) { bumpCache_(); }
+}
+
+/* ---------- 예약 실행: 근무 시간에 5분마다 캐시를 미리 만들어 둠 ---------- */
+
+/** 편집기에서 한 번 실행: 5분마다 warmCache 가 돌도록 예약 (권한 승인 필요) */
+function installWarmup() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'warmCache') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('warmCache').timeBased().everyMinutes(5).create();
+  warmCache(true);
+  Logger.log('예약 실행 설치 완료: 근무 시간(7~22시)에 5분마다 캐시를 새로 만듭니다.');
+}
+
+/** 예약 실행을 끄고 싶을 때 */
+function removeWarmup() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'warmCache') ScriptApp.deleteTrigger(t);
+  });
+  Logger.log('예약 실행을 껐습니다.');
+}
+
+function warmCache(always) {
+  var h = Number(Utilities.formatDate(new Date(), 'Asia/Seoul', 'H'));
+  if (always !== true && (h < 7 || h >= 22)) return;   // 밤에는 쉼 (실행 시간 한도 절약)
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(5000)) return;                     // 다른 계산·저장이 진행 중이면 이번 회차는 건너뜀
+  try {
+    var ver = cacheVersion_();
+    var data = buildData_();
+    cachePutBig_('dash_' + ver, data.dash);
+    cachePutBig_('boot_' + ver, data.boot);
+    cachePutBig_('det_' + ver, data.detail);
+  } finally {
+    lock.releaseLock();
   }
 }
 
@@ -313,8 +368,10 @@ function buildData_() {
 /** 방문 기록 저장 */
 function saveVisit(token, p) {
   requireAuth_(token);
-  var staff = getStaff_().names;
-  var accounts = getAccounts_();
+  // 검사용 목록은 캐시에서 (없으면 시트에서)
+  var cachedBoot = cacheGetBig_('boot_' + cacheVersion_());
+  var staff = cachedBoot ? cachedBoot.staff : getStaff_().names;
+  var accounts = cachedBoot ? cachedBoot.accounts : getAccounts_();
   var acc = accounts.filter(function (a) { return a.code === String(p.code); })[0];
 
   var date = parseDate_(p.date);
@@ -342,7 +399,12 @@ function saveVisit(token, p) {
     var r = sh.getLastRow();
     sh.getRange(r, 2).setNumberFormat('yyyy-mm-dd');
     sh.getRange(r, 11).setNumberFormat('yyyy-mm-dd');
-    bumpCache_();
+    patchCacheAfterSave_({
+      id: id, date: fmtDate_(date), visitor: p.visitor, code: acc.code, name: acc.name,
+      products: (p.products || []).join(', '), proposal: String(p.proposal || '').trim(), reaction: p.reaction,
+      result: String(p.result || '').trim(), nextAction: String(p.nextAction || '').trim(), nextDate: fmtDate_(nextDate),
+      companions: (p.companions || []).join(', '), source: '웹입력', note: ''
+    });
     return id;
   } finally {
     lock.releaseLock();
