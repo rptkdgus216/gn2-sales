@@ -233,7 +233,7 @@ function saveVisit(token, p) {
   if (staff.indexOf(p.visitor) === -1) throw new Error('방문자를 선택해 주세요.');
   if (!acc) throw new Error('거래처를 선택해 주세요.');
   if (REACTIONS.indexOf(p.reaction) === -1) throw new Error('원장님 반응을 선택해 주세요.');
-  if (!String(p.proposal || '').trim()) throw new Error('제안 내용(할일)을 입력해 주세요.');
+  if (!String(p.proposal || '').trim()) throw new Error('제안 내용(한일)을 입력해 주세요.');
   if (!String(p.result || '').trim()) throw new Error('결과(원장님 코멘트)를 입력해 주세요.');
   if (!String(p.nextAction || '').trim()) throw new Error('다음 액션을 입력해 주세요.');
   var nextDate = parseDate_(p.nextDate);
