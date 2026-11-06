@@ -117,6 +117,9 @@
   .tl-head b { color: var(--text); font-size: 13px; }
   .tl-body { margin-top: 6px; white-space: pre-wrap; line-height: 1.55; font-size: 13px; }
   .tl-body .q { color: var(--text-2); }
+  .edit-btn { margin-left: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 3px 10px; font-size: 12px; font-weight: 700; color: var(--text); cursor: pointer; }
+  .edit-btn:hover { border-color: var(--brand); color: var(--brand-ink); }
+  .editing-banner { background: var(--warn-bg); border-radius: 10px; padding: 10px 14px; font-size: 13px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .tl-next { margin-top: 6px; font-size: 12px; color: var(--brand-ink); font-weight: 700; }
 
   /* modal */
@@ -269,7 +272,8 @@
   <section id="tab-input" class="hidden">
     <div class="grid two">
       <form class="card" id="visitForm" onsubmit="submitVisit(event)">
-        <h2>방문 기록 입력</h2>
+        <h2 id="formTitle">방문 기록 입력</h2>
+        <div id="editBanner" class="editing-banner hidden" style="margin-bottom:12px">✏️ <b>기록 수정 중</b> <span id="editInfo" class="hint"></span></div>
         <div class="form">
           <div class="field"><label class="lbl" for="vDate">방문일 <span class="req">*</span></label><input type="date" id="vDate" required></div>
           <div class="field"><label class="lbl" for="vVisitor">방문자 <span class="req">*</span></label><select id="vVisitor" required onchange="onVisitorChange()"></select></div>
@@ -297,7 +301,7 @@
           <div class="field"><label class="lbl" for="vNext">다음 액션 <span class="req">*</span></label><input type="text" id="vNext" required placeholder="예) 위염코드 근거자료 전달"></div>
           <div class="field"><label class="lbl" for="vNextDate">다음 예정일 <span class="req">*</span></label><input type="date" id="vNextDate" required></div>
           <div class="field full"><label class="lbl">동도</label><div class="checks" id="vComp"></div></div>
-          <div class="full row-flex"><button class="btn" id="saveBtn" type="submit">저장</button><span class="hint">저장하면 '방문기록' 시트에 한 줄로 쌓입니다.</span></div>
+          <div class="full row-flex"><button class="btn" id="saveBtn" type="submit">저장</button><button class="btn ghost hidden" id="cancelEditBtn" type="button" onclick="cancelEdit()">수정 취소</button><span class="hint" id="saveHint">저장하면 '방문기록' 시트에 한 줄로 쌓입니다.</span></div>
         </div>
       </form>
       <div class="card">
@@ -318,7 +322,7 @@
 
 <script>
 /* ======================= 상태 ======================= */
-const state = { token: null, boot: null, dash: null, manager: 'ALL', year: null, tab: 'home', charts: {}, detailCache: {} };
+const state = { token: null, boot: null, dash: null, manager: 'ALL', year: null, tab: 'home', charts: {}, detailCache: {}, editing: null };
 const store = {
   get(k) { try { return window.localStorage.getItem(k); } catch (e) { return null; } },
   set(k, v) { try { window.localStorage.setItem(k, v); } catch (e) {} },
@@ -795,7 +799,9 @@ function renderDetail(code, a, det) {
           <div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}
             ${v.products ? v.products.split(',').map(p => `<span class="tag">${esc(p.trim())}</span>`).join('') : ''}
             ${v.companions ? `<span class="tag">동도: ${esc(v.companions)}</span>` : ''}
-            ${v.note ? `<span class="tag">${esc(v.note)}</span>` : ''}</div>
+            ${v.note ? `<span class="tag">${esc(v.note)}</span>` : ''}
+            ${v.modifiedAt ? `<span class="tag">수정됨 ${esc(v.modifiedAt)}</span>` : ''}
+            ${v.source === '웹입력' ? `<button class="edit-btn" onclick="editVisit('${esc(code)}','${esc(v.id)}')">✏️ 수정</button>` : ''}</div>
           <div class="tl-body">${v.proposal ? `<div class="q">▶ ${esc(v.proposal)}</div>` : ''}${esc(v.result)}</div>
           ${v.nextAction ? `<div class="tl-next">→ 다음: ${esc(v.nextAction)} ${v.nextDate ? '(' + esc(v.nextDate) + ')' : ''}</div>` : ''}
         </div>`).join('') : '<div class="empty">방문 기록이 없습니다.</div>'}</div>
@@ -956,7 +962,7 @@ async function onAccountChange() {
     const det = await getDetail(code);
     if (document.getElementById('vAccount').value !== code) return;
     const vs = det.visits.slice(0, 5);
-    box.innerHTML = vs.length ? '<div class="tl">' + vs.map(v => `<div class="tl-item"><div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}</div>
+    box.innerHTML = vs.length ? '<div class="tl">' + vs.map(v => `<div class="tl-item"><div class="tl-head"><b>${esc(v.date)}</b> ${esc(v.visitor)} ${chip(v.reaction)}${v.modifiedAt ? ` <span class="tag">수정됨</span>` : ''}${v.source === '웹입력' ? `<button class="edit-btn" onclick="editVisit('${esc(code)}','${esc(v.id)}')">✏️ 수정</button>` : ''}</div>
       <div class="tl-body">${v.proposal ? '<div class="q">▶ ' + esc(v.proposal) + '</div>' : ''}${esc(v.result)}</div>
       ${v.nextAction ? `<div class="tl-next">→ 다음: ${esc(v.nextAction)}</div>` : ''}</div>`).join('') + '</div>'
       : '<div class="empty">아직 방문 기록이 없습니다.</div>';
@@ -982,18 +988,67 @@ async function submitVisit(e) {
     nextDate: document.getElementById('vNextDate').value,
     companions: [...document.querySelectorAll('input[name=comp]:checked')].map(x => x.value)
   };
+  const editing = state.editing;
   btn.disabled = true; btn.textContent = '저장 중…';
   try {
-    await api('saveVisit', p);
-    toast('저장했습니다 ✓');
-    ['vProposal', 'vResult', 'vNext', 'vNextDate'].forEach(id => document.getElementById(id).value = '');
-    document.querySelectorAll('#visitForm input[type=checkbox][name], #visitForm input[type=radio]').forEach(x => x.checked = false);
+    if (editing) { await api('updateVisit', editing.id, p); toast('수정했습니다 ✓'); }
+    else { await api('saveVisit', p); toast('저장했습니다 ✓'); }
+    clearFormFields();
+    if (editing) exitEditMode();
     state.detailCache = {};
     onAccountChange();
     loadDashboardSilently();
-  } catch (err) { toast('저장 실패: ' + err.message); }
-  btn.disabled = false; btn.textContent = '저장';
+  } catch (err) { toast((editing ? '수정' : '저장') + ' 실패: ' + err.message); }
+  btn.disabled = false; btn.textContent = state.editing ? '수정 저장' : '저장';
 }
+function clearFormFields() {
+  ['vProposal', 'vResult', 'vNext', 'vNextDate'].forEach(id => document.getElementById(id).value = '');
+  document.querySelectorAll('#visitForm input[type=checkbox][name], #visitForm input[type=radio]').forEach(x => x.checked = false);
+}
+
+/* ======================= 방문 기록 수정 ======================= */
+function editVisit(code, id) {
+  const det = state.detailCache && state.detailCache[code];
+  const v = det && det.visits.find(x => x.id === id);
+  if (!v) { toast('기록을 찾지 못했습니다. 새로고침 후 다시 시도해 주세요.'); return; }
+  closeModal();
+  showTab('input');
+  state.editing = { id: v.id, code: v.code };
+  document.getElementById('formTitle').textContent = '방문 기록 수정';
+  document.getElementById('editBanner').classList.remove('hidden');
+  document.getElementById('editInfo').textContent = `${v.date} · ${v.name || ''} · ${v.visitor}`;
+  document.getElementById('saveBtn').textContent = '수정 저장';
+  document.getElementById('cancelEditBtn').classList.remove('hidden');
+  document.getElementById('saveHint').textContent = '수정하면 시트의 같은 줄이 바뀌고 수정일시가 남습니다.';
+  document.getElementById('vDate').value = v.date;
+  document.getElementById('vVisitor').value = v.visitor;
+  document.getElementById('vAllAcc').checked = false;
+  fillAccountSelect();
+  const sel = document.getElementById('vAccount');
+  if (![...sel.options].some(o => o.value === v.code)) { document.getElementById('vAllAcc').checked = true; fillAccountSelect(); }
+  sel.value = v.code;
+  const prods = v.products.split(',').map(x => x.trim()).filter(Boolean);
+  document.querySelectorAll('input[name=prod]').forEach(x => x.checked = prods.includes(x.value));
+  document.querySelectorAll('input[name=reaction]').forEach(x => x.checked = x.value === v.reaction);
+  const comps = v.companions.split(',').map(x => x.trim()).filter(Boolean);
+  document.querySelectorAll('input[name=comp]').forEach(x => x.checked = comps.includes(x.value));
+  document.getElementById('vProposal').value = v.proposal;
+  document.getElementById('vResult').value = v.result;
+  document.getElementById('vNext').value = v.nextAction;
+  document.getElementById('vNextDate').value = v.nextDate;
+  onAccountChange();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+function exitEditMode() {
+  state.editing = null;
+  document.getElementById('formTitle').textContent = '방문 기록 입력';
+  document.getElementById('editBanner').classList.add('hidden');
+  document.getElementById('saveBtn').textContent = '저장';
+  document.getElementById('cancelEditBtn').classList.add('hidden');
+  document.getElementById('saveHint').textContent = "저장하면 '방문기록' 시트에 한 줄로 쌓입니다.";
+  document.getElementById('vDate').value = state.boot.today;
+}
+function cancelEdit() { clearFormFields(); exitEditMode(); onAccountChange(); }
 async function loadDashboardSilently() {
   try {
     state.dash = await api('getDashboard'); state.detailCache = {};

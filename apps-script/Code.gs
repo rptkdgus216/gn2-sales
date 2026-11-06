@@ -14,7 +14,7 @@
 var SHEETS = { VISIT: '방문기록', ACCOUNT: '거래처', PRODUCT: '품목', STAFF: '담당자' };
 
 var VISIT_HEADERS = ['ID', '방문일', '방문자', '거래처코드', '거래처명', '제안품목', '제안내용', '반응',
-  '결과', '다음액션', '다음예정일', '동행', '입력일시', '출처', '비고'];
+  '결과', '다음액션', '다음예정일', '동행', '입력일시', '출처', '비고', '수정일시'];
 /** 구분: 방문처 / DCM(도매 매출자료로 평가 — 방문 통계에서 제외)
  *  거래처코드가 아직 없는 신규처는 TMP-0001 같은 임시코드를 쓰고, 실적이 나오면 "실적 연결"로 진짜 코드로 바꿉니다. */
 var ACCOUNT_HEADERS = ['거래처코드', '거래처명', '담당자', '구분', '진료과', '집중품목', '성향태그', '메모', '사용여부', '추가코드'];
@@ -61,6 +61,7 @@ var API_ = {
   getDashboard: getDashboard,
   getAccountDetail: getAccountDetail,
   saveVisit: saveVisit,
+  updateVisit: updateVisit,
   updateAccountProfile: updateAccountProfile,
   addAccount: addAccount,
   linkAccountCode: linkAccountCode,
@@ -267,6 +268,34 @@ function patchCacheAfterSave_(v) {
   } catch (e) { bumpCache_(); }
 }
 
+/** 방문 수정 후: 캐시의 해당 기록을 바꾸고, 대시보드용 요약을 다시 계산 */
+function patchCacheAfterUpdate_(v, oldCode) {
+  try {
+    var ver = cacheVersion_();
+    var dash = cacheGetBig_('dash_' + ver), det = cacheGetBig_('det_' + ver);
+    if (!dash || !det) { bumpCache_(); return; }
+    [oldCode, v.code].forEach(function (c) {
+      if (det.visitsByCode[c]) det.visitsByCode[c] = det.visitsByCode[c].filter(function (x) { return x.id !== v.id; });
+    });
+    (det.visitsByCode[v.code] = det.visitsByCode[v.code] || []).push(v);
+    var light = [], last = {};
+    Object.keys(det.visitsByCode).forEach(function (c) {
+      det.visitsByCode[c].forEach(function (x) {
+        light.push([x.date, x.visitor, x.code, x.reaction]);
+        var cur = last[x.code];
+        if (!cur || x.date >= cur.date) {
+          last[x.code] = { date: x.date, visitor: x.visitor, reaction: x.reaction,
+            result: String(x.result).slice(0, 140), nextAction: x.nextAction, nextDate: x.nextDate };
+        }
+      });
+    });
+    dash.visits = light; dash.lastVisit = last;
+    dash.generatedAt = Utilities.formatDate(new Date(), tz_(), 'yyyy-MM-dd HH:mm');
+    cachePutBig_('dash_' + ver, dash);
+    cachePutBig_('det_' + ver, det);
+  } catch (e) { bumpCache_(); }
+}
+
 /* ---------- 예약 실행: 근무 시간에 5분마다 캐시를 미리 만들어 둠 ---------- */
 
 /** 편집기에서 한 번 실행: 5분마다 warmCache 가 돌도록 예약 (권한 승인 필요) */
@@ -406,6 +435,74 @@ function saveVisit(token, p) {
       companions: (p.companions || []).join(', '), source: '웹입력', note: ''
     });
     return id;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 방문 기록 수정 — 앱으로 입력한 기록(출처 '웹입력')만. 삭제는 없음.
+ * 바뀐 칸을 덮어쓰고 '수정일시'를 남깁니다.
+ */
+function updateVisit(token, id, p) {
+  requireAuth_(token);
+  id = String(id || '');
+  var cachedBoot = cacheGetBig_('boot_' + cacheVersion_());
+  var staff = cachedBoot ? cachedBoot.staff : getStaff_().names;
+  var accounts = cachedBoot ? cachedBoot.accounts : getAccounts_();
+  var acc = accounts.filter(function (a) { return a.code === String(p.code); })[0];
+
+  var date = parseDate_(p.date);
+  if (!date) throw new Error('방문일을 확인해 주세요.');
+  if (staff.indexOf(p.visitor) === -1) throw new Error('방문자를 선택해 주세요.');
+  if (!acc) throw new Error('거래처를 선택해 주세요.');
+  if (REACTIONS.indexOf(p.reaction) === -1) throw new Error('원장님 반응을 선택해 주세요.');
+  if (!String(p.proposal || '').trim()) throw new Error('제안 내용(한일)을 입력해 주세요.');
+  if (!String(p.result || '').trim()) throw new Error('결과(원장님 코멘트)를 입력해 주세요.');
+  if (!String(p.nextAction || '').trim()) throw new Error('다음 액션을 입력해 주세요.');
+  var nextDate = parseDate_(p.nextDate);
+  if (!nextDate) throw new Error('다음 예정일을 입력해 주세요.');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var sh = sheet_(SHEETS.VISIT);
+    var last = sh.getLastRow();
+    if (last < 2) throw new Error('기록을 찾을 수 없습니다.');
+    var head = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function (x) { return String(x).trim(); });
+    var cId = head.indexOf('ID'), cSrc = head.indexOf('출처'), cMod = head.indexOf('수정일시'), cCode = head.indexOf('거래처코드');
+    if (cMod === -1) {                                  // 예전 시트: '수정일시' 열 추가
+      cMod = head.length;
+      sh.getRange(1, cMod + 1).setValue('수정일시').setFontWeight('bold').setBackground('#1e293b').setFontColor('#ffffff');
+    }
+    var ids = sh.getRange(2, cId + 1, last - 1, 1).getValues();
+    var rowNo = -1;
+    for (var i = 0; i < ids.length; i++) { if (String(ids[i][0]) === id) { rowNo = i + 2; break; } }
+    if (rowNo === -1) throw new Error('기록을 찾을 수 없습니다. 새로고침 후 다시 시도해 주세요.');
+    var src = String(sh.getRange(rowNo, cSrc + 1).getValue());
+    if (src !== '웹입력') throw new Error('앱으로 입력한 기록만 수정할 수 있습니다.');
+    var oldCode = normalizeCode_(sh.getRange(rowNo, cCode + 1).getValue());
+
+    // 방문일 ~ 동행 (2~12열)을 한 번에 덮어쓰기
+    sh.getRange(rowNo, 2, 1, 11).setValues([[
+      date, p.visitor, acc.code, acc.name,
+      (p.products || []).join(', '), clean_(p.proposal), p.reaction, clean_(p.result),
+      clean_(p.nextAction), nextDate, (p.companions || []).join(', ')
+    ]]);
+    sh.getRange(rowNo, 2).setNumberFormat('yyyy-mm-dd');
+    sh.getRange(rowNo, 11).setNumberFormat('yyyy-mm-dd');
+    var now = new Date();
+    sh.getRange(rowNo, cMod + 1).setValue(now).setNumberFormat('yyyy-mm-dd hh:mm');
+
+    var v = {
+      id: id, date: fmtDate_(date), visitor: p.visitor, code: acc.code, name: acc.name,
+      products: (p.products || []).join(', '), proposal: String(p.proposal || '').trim(), reaction: p.reaction,
+      result: String(p.result || '').trim(), nextAction: String(p.nextAction || '').trim(), nextDate: fmtDate_(nextDate),
+      companions: (p.companions || []).join(', '), source: '웹입력', note: '',
+      modifiedAt: Utilities.formatDate(now, tz_(), 'yyyy-MM-dd HH:mm')
+    };
+    patchCacheAfterUpdate_(v, oldCode);
+    return v;
   } finally {
     lock.releaseLock();
   }
@@ -615,7 +712,8 @@ function readVisits_() {
       products: String(r['제안품목'] || ''), proposal: String(r['제안내용'] || ''),
       reaction: String(r['반응'] || ''), result: String(r['결과'] || ''),
       nextAction: String(r['다음액션'] || ''), nextDate: fmtDate_(r['다음예정일']),
-      companions: String(r['동행'] || ''), source: String(r['출처'] || ''), note: String(r['비고'] || '')
+      companions: String(r['동행'] || ''), source: String(r['출처'] || ''), note: String(r['비고'] || ''),
+      modifiedAt: r['수정일시'] ? Utilities.formatDate(new Date(r['수정일시']), tz_(), 'yyyy-MM-dd HH:mm') : ''
     };
   }).filter(function (v) { return v.date && v.code; });
 }
@@ -881,7 +979,7 @@ function migrateLegacy() {
       'L' + LEGACY_YEAR + '-' + ('0000' + (i + 1)).slice(-5),
       new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2])),
       v.visitor, v.accountCode, v.accountName, v.products, v.todo, '', v.result,
-      '', '', v.companions, now, v.source, v.note
+      '', '', v.companions, now, v.source, v.note, ''
     ];
   });
   if (rows.length) {
