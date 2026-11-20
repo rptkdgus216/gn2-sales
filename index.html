@@ -771,7 +771,9 @@ function renderDetail(code, a, det) {
         <h2>거래처 프로필 ${acc.code ? '<span class="sub">코드 ' + esc(acc.code) + ((acc.extraCodes || []).length ? ' + 추가코드 ' + esc(acc.extraCodes.join(', ')) : '') + '</span>' : '<span class="sub">거래처 시트에 없는 곳이라 수정 불가</span>'}</h2>
         ${linkBoxHtml(code, a, acc)}
         <div class="form" style="grid-template-columns:1fr 1fr">
-          <div class="field full"><label class="lbl">집중품목</label><div>${esc(acc.focus || a.focus || '-')}</div></div>
+          <div class="field full"><label class="lbl" for="pFocus">집중품목 <span class="hint">(쉼표로 구분)</span></label>
+            <input type="text" id="pFocus" value="${esc(acc.focus || a.focus || '')}" placeholder="예) 펙수클루 10mg, 웰체크" list="focusProducts" ${acc.code ? '' : 'disabled'}>
+            <datalist id="focusProducts">${(state.boot.products || []).map(p => `<option value="${esc(p)}">`).join('')}</datalist></div>
           <div class="field"><label class="lbl" for="pType">구분</label>
             <select id="pType" ${acc.code ? '' : 'disabled'}>${['방문처', 'DCM'].map(t => `<option ${(acc.type || '방문처') === t ? 'selected' : ''}>${t}</option>`).join('')}</select>
             <div class="hint">DCM: 도매 매출자료로 평가 · 방문 통계에서 제외</div></div>
@@ -814,14 +816,14 @@ function renderDetail(code, a, det) {
 async function saveProfile(code, btn) {
   btn.disabled = true;
   try {
-    const profile = { type: document.getElementById('pType').value, dept: document.getElementById('pDept').value, tags: document.getElementById('pTags').value, memo: document.getElementById('pMemo').value };
+    const profile = { type: document.getElementById('pType').value, dept: document.getElementById('pDept').value, focus: document.getElementById('pFocus').value, tags: document.getElementById('pTags').value, memo: document.getElementById('pMemo').value };
     await api('updateAccountProfile', code, profile);
     if (state.detailCache) delete state.detailCache[code];
     const a = state.dash.accounts.find(x => x.code === code);
-    if (a) { a.dept = profile.dept; a.tags = profile.tags; a.type = profile.type; }
+    if (a) { a.dept = profile.dept; a.focus = profile.focus; a.tags = profile.tags; a.type = profile.type; }
     const b = state.boot.accounts.find(x => x.code === code);
     if (b) b.type = profile.type;
-    prepare();
+    prepare(); saveLocal();
     toast('프로필을 저장했습니다.');
     renderAll();
   } catch (e) { toast('저장 실패: ' + e.message); }

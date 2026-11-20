@@ -508,7 +508,7 @@ function updateVisit(token, id, p) {
   }
 }
 
-/** 거래처 프로필(구분·진료과·성향태그·메모) 수정 */
+/** 거래처 프로필(구분·진료과·집중품목·성향태그·메모) 수정 */
 function updateAccountProfile(token, code, profile) {
   requireAuth_(token);
   var t = readTable_(SHEETS.ACCOUNT);
@@ -520,10 +520,29 @@ function updateAccountProfile(token, code, profile) {
   };
   if (ACCOUNT_TYPES.indexOf(profile.type) !== -1) set('구분', profile.type);
   set('진료과', profile.dept);
+  if (profile.focus !== undefined) set('집중품목', profile.focus);
   set('성향태그', profile.tags);
   set('메모', profile.memo);
-  bumpCache_();
+  patchCacheAccount_(String(code), profile);
   return true;
+}
+
+/** 프로필 수정 후: 캐시의 해당 거래처 정보만 바꿈 (전체 재계산 없이) */
+function patchCacheAccount_(code, profile) {
+  try {
+    var ver = cacheVersion_();
+    var dash = cacheGetBig_('dash_' + ver), det = cacheGetBig_('det_' + ver), boot = cacheGetBig_('boot_' + ver);
+    if (!dash || !det || !boot) { bumpCache_(); return; }
+    var f = {};
+    if (ACCOUNT_TYPES.indexOf(profile.type) !== -1) f.type = profile.type;
+    ['dept', 'focus', 'tags', 'memo'].forEach(function (k) { if (profile[k] !== undefined) f[k] = String(profile[k] || '').trim(); });
+    dash.accounts.forEach(function (a) { if (a.code === code) Object.keys(f).forEach(function (k) { if (k !== 'memo') a[k] = f[k]; }); });
+    if (det.accountsByCode[code]) Object.keys(f).forEach(function (k) { det.accountsByCode[code][k] = f[k]; });
+    if (f.type) boot.accounts.forEach(function (a) { if (a.code === code) a.type = f.type; });
+    cachePutBig_('dash_' + ver, dash);
+    cachePutBig_('det_' + ver, det);
+    cachePutBig_('boot_' + ver, boot);
+  } catch (e) { bumpCache_(); }
 }
 
 /**
