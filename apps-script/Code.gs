@@ -332,11 +332,40 @@ function warmCache(always) {
   }
 }
 
+/**
+ * 평가실적에는 있는데 '거래처' 탭에 없는 거래처코드를 자동으로 등록 (구분: 방문처)
+ *  - 같은 거래처 여부는 거래처코드(추가코드 포함)로만 판단
+ *  - 사용여부 N 으로 꺼 둔 거래처는 다시 넣지 않음
+ */
+function autoRegisterAccounts_(sales, allAccounts) {
+  var used = usedCodes_(allAccounts);
+  var codes = Object.keys(sales.byCode).filter(function (c) { return !used[c] && !isTmpCode_(c); });
+  if (!codes.length) return [];
+  var t = readTable_(SHEETS.ACCOUNT);
+  var today = fmtDate_(new Date());
+  var added = [];
+  var rows = codes.map(function (code) {
+    var info = sales.info[code] || {};
+    var a = { code: code, name: info.name || code, owner: info.owner || '', dept: '', type: '방문처', focus: '',
+      tags: '', memo: '평가실적 자동 등록 (' + today + ')', active: true, extraCodes: [] };
+    added.push(a);
+    var v = { '거래처코드': a.code, '거래처명': a.name, '담당자': a.owner, '구분': '방문처', '메모': a.memo, '사용여부': 'Y' };
+    return t.headers.map(function (h) { return v[h] !== undefined ? v[h] : ''; });
+  });
+  var start = t.sheet.getLastRow() + 1;
+  var cCode = t.headers.indexOf('거래처코드');
+  t.sheet.getRange(start, cCode + 1, rows.length, 1).setNumberFormat('@');
+  t.sheet.getRange(start, 1, rows.length, t.headers.length).setValues(rows);
+  return added;
+}
+
 /** 시트 전체를 읽어 화면에 필요한 데이터를 한 번에 계산 */
 function buildData_() {
   var staff = getStaff_();
-  var accounts = getAccounts_();
+  var allAccounts = getAccounts_(true);               // 사용 안 함(N) 포함
   var sales = readSales_(staff.alias);
+  var added = autoRegisterAccounts_(sales, allAccounts);
+  var accounts = allAccounts.concat(added).filter(function (a) { return a.active; });
   var visits = readVisits_();
 
   var byCode = {}, accountsByCode = {}, salesByCode = {};
